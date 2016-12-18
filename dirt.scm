@@ -18,6 +18,9 @@
 
 (define labels (make-hash-table))
 
+(define (label? a)
+  (symbol? a))
+
 (define (reg? r)
   (cond ((assoc r regs) #t)
         (else #f)))
@@ -145,6 +148,14 @@
            ((imm32? j)
             ; subtract the length of the instr itself (- 6)
             `(#x0F #x85 ,@(immediate (- j 6))))))))
+    ((call)
+     (lambda (l)
+       ; TODO: handle pointer
+       (cond
+         ((label? l)
+          `(#xE8 ,@(immediate (- (hash-table-ref labels l) byte-len 5))))
+         (else
+           (error "can't call" l)))))
     (else
       (error "unknown x86 instruction " instr))))
 
@@ -167,12 +178,13 @@
                         (push 800)
                         (mov 3 %eax)
                         (mov %eax %ebx)
-                        (label 'TEST)
+                        (label TEST)
                         (cmp 3 %eax)
                         (add 4 %eax)
                         (cmp %eax %ebx)
-                        (je 'TEST)
-                        (jne 'TEST)
+                        (je TEST)
+                        (jne TEST)
+                        (call TEST)
                         (pop %eax)
-                        (jmp 'TEST)
+                        (jmp TEST)
                         (ret))))))
