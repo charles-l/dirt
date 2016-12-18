@@ -28,12 +28,9 @@
   (exact? x))
 
 (define (imm8? x)
-  (and (exact? x)
+  (and (number? x)
+       (exact? x)
        (<= 0 x 255)))
-
-(define (immu8? x)
-  (and (exact? x)
-       (<= -128 x 127)))
 
 (define (emit-byte byte)
   (write-byte byte (current-output-port)))
@@ -48,12 +45,12 @@
 (define (byte val)
   (bitwise-and #xFF val))
 
-; uh... figure out what this is doing (yay for copypasta)
-(define (modr/m r1 r2)
+; http://wiki.osdev.org/X86-64_Instruction_Encoding#ModR.2FM_and_SIB_bytes
+(define (modr/m reg rm)
   (bitwise-ior
-    #b11000000
-    (arithmetic-shift (reg-code r1) 3)
-    (reg-code r2)))
+    #b11000000 ; register-direct addressing mode
+    (arithmetic-shift reg 3)
+    rm))
 
 (define (immediate v)
   (list (byte v)
@@ -69,18 +66,22 @@
     ((mov)
      (lambda (r1 r2)
        (cond
-         ((reg? r1)
-          (list #x89 (modr/m r1 r2)))
+         ((and (reg? r1) (reg? r2))
+          (list #x89 (modr/m (reg-code r1) (reg-code r2))))
+         ((and (reg? r2) (imm32? r1))
+          `(,(code+reg #xB8 r2)
+             ,@(immediate r1)))
          (else
-           `(,(code+reg #xB8 r2)
-              ,@(immediate r1))))))
+           (error "unknown/unimplemented mov command" (list instr r1 r2))))))
     ((push)
      (lambda (r1)
        (cond
          ((reg? r1)
           (code+reg #x50 r1))
          ((imm8? r1)
-          (list #x6A r1)))))
+          (list #x6A r1))
+         ((imm32? r1)
+          `(#x68 ,@(immediate r1))))))
     ((pop)
      (lambda (r1)
        (code+reg #x58 r1)))
@@ -88,10 +89,14 @@
      (lambda (r1 r2)
        (cond
          ((eq? r2 '%eax)
-           `(#x3D ,@(immediate r1)))
-         ;((reg? r2)
-         ; `(#x81 (reg-code r2) ,@(immediate r1)))
-         )))
+          `(#x3D ,@(immediate r1)))
+         ((reg? r2)
+          (list #x3B (modr/m (reg-code r2) (reg-code r1)))))))
+    ((add)
+     (lambda (r1 r2)
+       (cond
+         ((eq? r2 '%eax)
+          `(#x05 ,@(immediate r1))))))
     (else
       (error "unknown x86 instruction " instr))))
 
@@ -108,8 +113,11 @@
        append
        (map (lambda (x) (if (list? x) x (list x)))
             (assemble '((push 3)
+                        (push 800)
                         (mov 3 %eax)
                         (mov %eax %ebx)
                         (cmp 3 %eax)
+                        (add 4 %eax)
+                        (cmp %eax %ebx)
                         (pop %eax)
                         (ret))))))
