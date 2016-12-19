@@ -116,6 +116,9 @@
        (cond
          ((and (eq? r1 '%eax) (imm32? r2))
           `(#x2D ,@(immediate r2))))))
+    ((imul)
+     (lambda (r1 r2)
+       `(#x0F #xAF ,(modr/m (reg-code r2) (reg-code r1)))))
     ((label)
      (lambda (l)
        (hash-table-set! labels l byte-len)
@@ -214,5 +217,6 @@
                         (or %eax 4)
                         (shl %eax 4)
                         (shr %eax 4)
+                        (imul %eax %ebx)
                         (and %ebx 4)
                         (ret))))))
