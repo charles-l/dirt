@@ -21,6 +21,13 @@
 (define (label? a)
   (symbol? a))
 
+; allows forward reference of label during first pass
+(define (label-addr labels l byte-len size post-thunk)
+  (cons
+    size
+    (lambda ()
+      (post-thunk (- (hash-table-ref labels l) byte-len size)))))
+
 (define (reg? r)
   (cond ((assoc r regs) #t)
         (else #f)))
@@ -32,7 +39,8 @@
 
 ;; immediates
 (define (imm32? x)
-  (exact? x))
+  (and (number? x)
+       (exact? x)))
 
 (define (imm8? x)
   (and (number? x)
@@ -82,9 +90,8 @@
        (cond
          ((and (reg? r1) (reg? r2))
           `(#x89 ,(modr/m (reg-code r1) (reg-code r2))))
-         ((and (reg? r2) (imm32? r1))
-          `(,(code+reg #xB8 r2)
-             ,@(immediate r1)))
+         ((and (imm32? r1) (reg? r2))
+          `(,(code+reg #xB8 r2) ,@(immediate r1)))
          (else
            (error "unknown/unimplemented mov command" (list instr r1 r2))))))
     ((push)
@@ -102,9 +109,9 @@
     ((cmp)
      (lambda (r1 r2)
        (cond
-         ((eq? r2 '%eax)
-          `(#x3D ,@(immediate r1)))
-         ((reg? r2)
+         ((and (eq? r1 '%eax) (imm32? r2))
+          `(#x3D ,@(immediate r2)))
+         ((and (reg? r1) (reg? r2))
           `(#x3B ,(modr/m (reg-code r2) (reg-code r1)))))))
     ((add)
      (lambda (r1 r2)
@@ -118,10 +125,18 @@
           `(#x2D ,@(immediate r2))))))
     ((imul)
      (lambda (r1 r2)
-       `(#x0F #xAF ,(modr/m (reg-code r2) (reg-code r1)))))
+       (cond
+         ((and (reg? r1) (reg? r2))
+          `(#x0F #xAF ,(modr/m (reg-code r2) (reg-code r1)))))))
     ((label)
      (lambda (l)
-       (hash-table-set! labels l byte-len)
+       (cond
+         ((label? l)
+          (let ((s (hash-table-ref/default labels l #f)))
+            (if s (error "label already defined" l)
+              (hash-table-set! labels l byte-len))))
+         (else
+           (error "not a label" l)))
        '()))
     ((or)
      (lambda (r1 r2)
@@ -135,43 +150,31 @@
           `(#x81 ,(modr/m 4 (reg-code r1)) ,@(immediate r2))))))
     ((jmp)
      (lambda (l)
-       ; get the relative location to the label
-       (let ((j (- (hash-table-ref labels l) byte-len)))
-         (cond
-           ((immu8? j)
-            ; subtract the length of the instr itself (- 2)
-            `(#xEB ,(- j 2)))
-           ((imm32? j)
-            ; subtract the length of the instr itself (- 5)
-            `(#xE9 ,@(immediate (- j 5))))))))
+       (label-addr labels l byte-len
+                   5
+                   (lambda (addr)
+                     `(#xE9 ,@(immediate addr))))))
     ((je) ; TODO: dedup this code
      (lambda (l)
-       ; get the relative location to the label
-       (let ((j (- (hash-table-ref labels l) byte-len)))
-         (cond
-           ((immu8? j)
-            ; subtract the length of the instr itself (- 2)
-            `(#x74 ,(- j 2)))
-           ((imm32? j)
-            ; subtract the length of the instr itself (- 6)
-            `(#x0F #x84 ,@(immediate (- j 6))))))))
+       (label-addr labels l byte-len
+                   6
+                   (lambda (addr)
+                     `(#x0F #x84 ,@(immediate addr))))))
     ((jne) ; TODO: dedup this code
      (lambda (l)
-       ; get the relative location to the label
-       (let ((j (- (hash-table-ref labels l) byte-len)))
-         (cond
-           ((immu8? j)
-            ; subtract the length of the instr itself (- 2)
-            `(#x75 ,(- j 2)))
-           ((imm32? j)
-            ; subtract the length of the instr itself (- 6)
-            `(#x0F #x85 ,@(immediate (- j 6))))))))
+       (label-addr labels l byte-len
+                   6
+                   (lambda (addr)
+                     `(#x0F #x85 ,@(immediate addr))))))
     ((call)
      (lambda (l)
        ; TODO: handle pointer
        (cond
          ((label? l)
-          `(#xE8 ,@(immediate (- (hash-table-ref labels l) byte-len 5))))
+          (label-addr labels l byte-len
+                      5
+                      (lambda (addr)
+                        `(#xE8 ,@(immediate addr)))))
          (else
            (error "can't call" l)))))
     ((shl)
@@ -185,12 +188,22 @@
 
 (define (assemble asm)
   (let ((byte-len 0))
-    (map
-     (lambda (l)
-       (let ((o (apply (x86 (car l) byte-len) (cdr l))))
-         (set! byte-len (+ byte-len (length o)))
-         o))
-     asm)))
+    (map ; second pass
+      (lambda (l)
+        (cond
+          ((procedure? l) (l)) ; fill in label addresses
+          (else l)))
+      (map ; first pass
+       (lambda (l)
+         (let ((o (apply (x86 (car l) byte-len) (cdr l))))
+           (cond
+             ((not (list? o))
+              (set! byte-len (+ byte-len (car o)))
+              (cdr o))
+             (else
+               (set! byte-len (+ byte-len (length o)))
+               o))))
+       asm))))
 
 ;; test
 
@@ -204,7 +217,7 @@
                         (mov 3 %eax)
                         (mov %eax %ebx)
                         (label TEST)
-                        (cmp 3 %eax)
+                        (cmp %eax 3)
                         (add %eax 4)
                         (label FOO)
                         (sub %eax 40000)
@@ -213,8 +226,9 @@
                         (jne FOO)
                         (call TEST)
                         (pop %eax)
-                        (jmp TEST)
+                        (jmp BLAH)
                         (or %eax 4)
+                        (label BLAH)
                         (shl %eax 4)
                         (shr %eax 4)
                         (imul %eax %ebx)
