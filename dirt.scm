@@ -3,7 +3,7 @@
 ; http://bazaar.launchpad.net/~aghuloum/ikarus/ikarus.dev/annotate/head%3A/scheme/ikarus.intel-assembler.ss
 ; https://github.com/noelwelsh/assembler
 
-(use srfi-69)
+(use srfi-69 matchable)
 
 (define regs
   ;  name  width  code
@@ -17,9 +17,6 @@
     (%edi  32     7)))
 
 (define labels (make-hash-table))
-
-(define (label? a)
-  (symbol? a))
 
 ; allows forward reference of label during first pass
 (define (label-addr labels l byte-len size post-thunk)
@@ -83,111 +80,68 @@
         (byte (arithmetic-shift v -16))
         (byte (arithmetic-shift v -24))))
 
-(define (x86 instr byte-len)
-  (case instr
-    ((ret)
-     (lambda ()
-       `(#xC3)))
-    ((mov)
-     (lambda (r1 r2)
-       (cond
-         ((and (reg? r1) (reg? r2))
+(define (x86 expr byte-len)
+  (match expr
+         (('ret)
+          `(#xC3))
+         (('mov (? reg? r1) (? reg? r2))
           `(#x89 ,(modr/m (reg-code r1) (reg-code r2))))
-         ((and (reg? r1) (mem? r2))
-          `(#x89 ,(modr/m (reg-code r1) (reg-code (car r2)) #b00)))
-         ((and (imm32? r1) (reg? r2))
-          `(,(code+reg #xB8 r2) ,@(immediate r1)))
-         ((and (mem? r1) (reg? r2))
-          `(#x8B ,(modr/m (reg-code (car r1)) 0 #b00)))
-         (else
-           (error "unknown/unimplemented mov command" (list instr r1 r2))))))
-    ((push)
-     (lambda (r1)
-       (cond
-         ((reg? r1)
-          `(,(code+reg #x50 r1)))
-         ((imm8? r1)
-          `(#x6A ,r1))
-         ((imm32? r1)
-          `(#x68 ,@(immediate r1))))))
-    ((pop)
-     (lambda (r1)
-       `(,(code+reg #x58 r1))))
-    ((cmp)
-     (lambda (r1 r2)
-       (cond
-         ((and (eq? r1 '%eax) (imm32? r2))
-          `(#x3D ,@(immediate r2)))
-         ((and (reg? r1) (reg? r2))
-          `(#x3B ,(modr/m (reg-code r2) (reg-code r1)))))))
-    ((add)
-     (lambda (r1 r2)
-       (cond
-         ((and (eq? r1 '%eax) (imm32? r2))
-          `(#x05 ,@(immediate r2))))))
-    ((sub)
-     (lambda (r1 r2)
-       (cond
-         ((and (eq? r1 '%eax) (imm32? r2))
-          `(#x2D ,@(immediate r2))))))
-    ((imul)
-     (lambda (r1 r2)
-       (cond
-         ((and (reg? r1) (reg? r2))
-          `(#x0F #xAF ,(modr/m (reg-code r2) (reg-code r1)))))))
-    ((label)
-     (lambda (l)
-       (cond
-         ((label? l)
-          (let ((s (hash-table-ref/default labels l #f)))
-            (if s (error "label already defined" l)
-              (hash-table-set! labels l byte-len))))
-         (else
-           (error "not a label" l)))
-       '()))
-    ((or)
-     (lambda (r1 r2)
-       (cond
-         ((and (reg? r1) (imm32? r2))
-          `(#x81 ,(modr/m #b001 (reg-code r1)) ,@(immediate r2))))))
-    ((and)
-     (lambda (r1 r2)
-       (cond
-         ((and (reg? r1) (imm32? r2))
-          `(#x81 ,(modr/m #b100 (reg-code r1)) ,@(immediate r2))))))
-    ((jmp)
-     (lambda (l)
-       (label-addr labels l byte-len 5
-                   (lambda (addr)
-                     `(#xE9 ,@(immediate addr))))))
-    ((je) ; TODO: dedup this code
-     (lambda (l)
-       (label-addr labels l byte-len 6
-                   (lambda (addr)
-                     `(#x0F #x84 ,@(immediate addr))))))
-    ((jne) ; TODO: dedup this code
-     (lambda (l)
-       (label-addr labels l byte-len 6
-                   (lambda (addr)
-                     `(#x0F #x85 ,@(immediate addr))))))
-    ((call)
-     (lambda (l)
-       ; TODO: handle pointer
-       (cond
-         ((label? l)
+         (('mov (? reg? r) (? mem? m))
+          `(#x89 ,(modr/m (reg-code r) (reg-code (car m)) #b00)))
+         (('mov (? imm32? i) (? reg? r))
+          `(,(code+reg #xB8 r) ,@(immediate i)))
+         (('mov (? mem? m) (? reg? r)) ; TODO: uh... prolly use that register there bud
+          `(#x8B ,(modr/m (reg-code (car m)) 0 #b00)))
+         (('push (? reg? r))
+          `(,(code+reg #x50 r)))
+         (('push (? imm8? i))
+          `(#x6A ,i))
+         (('push (? imm32? i))
+          `(#x68 ,@(immediate i)))
+         (('pop (? reg? r))
+          `(,(code+reg #x58 r)))
+         (('cmp '%eax (? imm32? i))
+          `(#x3D ,@(immediate i)))
+         (('cmp (? reg? r1) (? reg? r2))
+          `(#x3B ,(modr/m (reg-code r2) (reg-code r1))))
+         (('add '%eax (? imm32? i))
+          `(#x05 ,@(immediate i)))
+         (('sub '%eax (? imm32? i))
+          `(#x2D ,@(immediate i)))
+         (('imul (? reg? r1) (? reg? r2))
+          `(#x0F #xAF ,(modr/m (reg-code r2) (reg-code r1))))
+         (('label (? symbol? l))
+          (if (hash-table-ref/default labels l #f)
+            (error "label already defined" l)
+            (hash-table-set! labels l byte-len))
+          '())
+         (('or (? reg? r) (? imm32? i))
+          `(#x81 ,(modr/m #b001 (reg-code r)) ,@(immediate i)))
+         (('and (? reg? r) (? imm32? i))
+          `(#x81 ,(modr/m #b100 (reg-code r)) ,@(immediate i)))
+         (('jmp (? symbol? l))
           (label-addr labels l byte-len 5
                       (lambda (addr)
+                        `(#xE9 ,@(immediate addr)))))
+         (('je (? symbol? l))
+          (label-addr labels l byte-len 6
+                      (lambda (addr)
+                        `(#x0F #x84 ,@(immediate addr)))))
+         (('jne (? symbol? l))
+          (label-addr labels l byte-len 6
+                      (lambda (addr)
+                        `(#x0F #x85 ,@(immediate addr)))))
+         (('call (? symbol? l))
+          ; TODO: handle pointer
+          (label-addr labels l byte-len 6
+                      (lambda (addr)
                         `(#xE8 ,@(immediate addr)))))
-         (else
-           (error "can't call" l)))))
-    ((shl)
-     (lambda (r1 r2)
-       `(#xC1 ,(modr/m #b100 (reg-code r1)) ,r2)))
-    ((shr)
-     (lambda (r1 r2)
-       `(#xC1 ,(modr/m #b101 (reg-code r1)) ,r2)))
-    (else
-      (error "unknown x86 instruction " instr))))
+         (('shl (? reg? r1) (? imm8? i))
+          `(#xC1 ,(modr/m #b100 (reg-code r1)) ,i))
+         (('shr (? reg? r1) (? imm8? r2))
+          `(#xC1 ,(modr/m #b101 (reg-code r1)) ,r2))
+         (=>
+           (error "failed to parse expression" expr))))
 
 (define (assemble asm)
   (let ((byte-len 0))
@@ -197,8 +151,8 @@
           ((procedure? l) (l)) ; fill in label addresses
           (else l)))
       (map ; first pass
-       (lambda (l)
-         (let ((o (apply (x86 (car l) byte-len) (cdr l))))
+       (lambda (expr)
+         (let ((o (x86 expr byte-len)))
            (cond
              ((not (list? o))
               (set! byte-len (+ byte-len (car o)))
@@ -224,10 +178,10 @@
                         (label TEST)
                         (cmp %eax 3)
                         (add %eax 4)
-                        (label FOO)
                         (sub %eax 40000)
                         (cmp %eax %ebx)
                         (je TEST)
+                        (label FOO)
                         (jne FOO)
                         (call TEST)
                         (pop %eax)
