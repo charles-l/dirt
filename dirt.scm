@@ -29,8 +29,11 @@
       (post-thunk (- (hash-table-ref labels l) byte-len size)))))
 
 (define (reg? r)
-  (cond ((assoc r regs) #t)
+  (cond ((and (symbol? r) (assoc r regs)) #t)
         (else #f)))
+
+(define (mem? t)
+  (pair? t))
 
 (define (reg-code reg)
   (cond ((assoc reg regs) => caddr)
@@ -66,9 +69,9 @@
   (bitwise-and #xFF val))
 
 ; http://wiki.osdev.org/X86-64_Instruction_Encoding#ModR.2FM_and_SIB_bytes
-(define (modr/m reg rm)
+(define (modr/m reg rm #!optional mod)
   (bitwise-ior
-    #b11000000 ; register-direct addressing mode
+    (arithmetic-shift (or mod #b11) 6) ; default to register-direct addressing mode
     (arithmetic-shift reg 3)
     rm))
 
@@ -90,8 +93,12 @@
        (cond
          ((and (reg? r1) (reg? r2))
           `(#x89 ,(modr/m (reg-code r1) (reg-code r2))))
+         ((and (reg? r1) (mem? r2))
+          `(#x89 ,(modr/m (reg-code r1) (reg-code (car r2)) #b00)))
          ((and (imm32? r1) (reg? r2))
           `(,(code+reg #xB8 r2) ,@(immediate r1)))
+         ((and (mem? r1) (reg? r2))
+          `(#x8B ,(modr/m (reg-code (car r1)) 0 #b00)))
          (else
            (error "unknown/unimplemented mov command" (list instr r1 r2))))))
     ((push)
@@ -142,28 +149,25 @@
      (lambda (r1 r2)
        (cond
          ((and (reg? r1) (imm32? r2))
-          `(#x81 ,(modr/m 1 (reg-code r1)) ,@(immediate r2))))))
+          `(#x81 ,(modr/m #b001 (reg-code r1)) ,@(immediate r2))))))
     ((and)
      (lambda (r1 r2)
        (cond
          ((and (reg? r1) (imm32? r2))
-          `(#x81 ,(modr/m 4 (reg-code r1)) ,@(immediate r2))))))
+          `(#x81 ,(modr/m #b100 (reg-code r1)) ,@(immediate r2))))))
     ((jmp)
      (lambda (l)
-       (label-addr labels l byte-len
-                   5
+       (label-addr labels l byte-len 5
                    (lambda (addr)
                      `(#xE9 ,@(immediate addr))))))
     ((je) ; TODO: dedup this code
      (lambda (l)
-       (label-addr labels l byte-len
-                   6
+       (label-addr labels l byte-len 6
                    (lambda (addr)
                      `(#x0F #x84 ,@(immediate addr))))))
     ((jne) ; TODO: dedup this code
      (lambda (l)
-       (label-addr labels l byte-len
-                   6
+       (label-addr labels l byte-len 6
                    (lambda (addr)
                      `(#x0F #x85 ,@(immediate addr))))))
     ((call)
@@ -171,18 +175,17 @@
        ; TODO: handle pointer
        (cond
          ((label? l)
-          (label-addr labels l byte-len
-                      5
+          (label-addr labels l byte-len 5
                       (lambda (addr)
                         `(#xE8 ,@(immediate addr)))))
          (else
            (error "can't call" l)))))
     ((shl)
      (lambda (r1 r2)
-       `(#xC1 ,(modr/m 4 (reg-code r1)) ,r2)))
+       `(#xC1 ,(modr/m #b100 (reg-code r1)) ,r2)))
     ((shr)
      (lambda (r1 r2)
-       `(#xC1 ,(modr/m 5 (reg-code r1)) ,r2)))
+       `(#xC1 ,(modr/m #b101 (reg-code r1)) ,r2)))
     (else
       (error "unknown x86 instruction " instr))))
 
@@ -213,6 +216,8 @@
        (map (lambda (x) (if (list? x) x (list x)))
             (assemble '((push 3)
                         (push 800)
+                        (mov (%eax) %eax)
+                        (mov %eax (%eax))
                         (push %ecx)
                         (mov 3 %eax)
                         (mov %eax %ebx)
