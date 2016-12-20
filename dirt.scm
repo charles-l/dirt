@@ -80,66 +80,92 @@
         (byte (arithmetic-shift v -16))
         (byte (arithmetic-shift v -24))))
 
+(define (mem-access r m)
+  (cond
+    ((or (null? (cdr m)) (zero? (car m)))
+     `(,(modr/m (reg-code r) (reg-code (car m)) #b00)))
+    ((imm8? (car m))
+     `(,(modr/m (reg-code r) (reg-code (cdr m)) #b01) ,(car m)))
+    ((imm32? (car m))
+     `(,(modr/m (reg-code r) (reg-code (cdr m)) #b10) ,@(immediate (car m))))))
+
 (define (x86 expr byte-len)
   (match expr
          (('ret)
           `(#xC3))
+
          (('mov (? reg? r1) (? reg? r2))
           `(#x89 ,(modr/m (reg-code r1) (reg-code r2))))
          (('mov (? reg? r) (? mem? m))
-          `(#x89 ,(modr/m (reg-code r) (reg-code (car m)) #b00)))
+          `(#x89 ,@(mem-access r m)))
+         (('mov (? mem? m) (? reg? r))
+          `(#x8B ,@(mem-access r m)))
          (('mov (? imm32? i) (? reg? r))
           `(,(code+reg #xB8 r) ,@(immediate i)))
-         (('mov (? mem? m) (? reg? r))
-          `(#x8B ,(modr/m (reg-code r) (reg-code (car m)) #b00)))
+
          (('push (? reg? r))
           `(,(code+reg #x50 r)))
          (('push (? imm8? i))
           `(#x6A ,i))
          (('push (? imm32? i))
           `(#x68 ,@(immediate i)))
+
          (('pop (? reg? r))
           `(,(code+reg #x58 r)))
+
          (('cmp '%eax (? imm32? i))
           `(#x3D ,@(immediate i)))
          (('cmp (? reg? r1) (? reg? r2))
           `(#x3B ,(modr/m (reg-code r2) (reg-code r1))))
+
          (('add '%eax (? imm32? i))
           `(#x05 ,@(immediate i)))
+
          (('sub '%eax (? imm32? i))
           `(#x2D ,@(immediate i)))
+
          (('imul (? reg? r1) (? reg? r2))
           `(#x0F #xAF ,(modr/m (reg-code r2) (reg-code r1))))
+
          (('label (? symbol? l))
           (if (hash-table-ref/default labels l #f)
             (error "label already defined" l)
             (hash-table-set! labels l byte-len))
           '())
+
          (('or (? reg? r) (? imm32? i))
           `(#x81 ,(modr/m #b001 (reg-code r)) ,@(immediate i)))
+
          (('and (? reg? r) (? imm32? i))
           `(#x81 ,(modr/m #b100 (reg-code r)) ,@(immediate i)))
+
          (('jmp (? symbol? l))
           (label-addr labels l byte-len 5
                       (lambda (addr)
                         `(#xE9 ,@(immediate addr)))))
+
          (('je (? symbol? l))
           (label-addr labels l byte-len 6
                       (lambda (addr)
                         `(#x0F #x84 ,@(immediate addr)))))
+
          (('jne (? symbol? l))
           (label-addr labels l byte-len 6
                       (lambda (addr)
                         `(#x0F #x85 ,@(immediate addr)))))
+
          (('call (? symbol? l))
           ; TODO: handle pointer
           (label-addr labels l byte-len 6
                       (lambda (addr)
                         `(#xE8 ,@(immediate addr)))))
+
          (('shl (? reg? r1) (? imm8? i))
           `(#xC1 ,(modr/m #b100 (reg-code r1)) ,i))
+
          (('shr (? reg? r1) (? imm8? r2))
           `(#xC1 ,(modr/m #b101 (reg-code r1)) ,r2))
+
          (=>
            (error "failed to parse expression" expr))))
 
@@ -162,34 +188,13 @@
                o))))
        asm))))
 
-;; test
-
-(map emit-byte
-     (apply
-       append
-       (map (lambda (x) (if (list? x) x (list x)))
-            (assemble '((push 3)
-                        (push 800)
-                        (mov (%ecx) %ebx)
-                        (mov %ebx (%ecx))
-                        (push %ecx)
-                        (mov 3 %eax)
-                        (mov %eax %ebx)
-                        (label TEST)
-                        (cmp %eax 3)
-                        (add %eax 4)
-                        (sub %eax 40000)
-                        (cmp %eax %ebx)
-                        (je TEST)
-                        (label FOO)
-                        (jne FOO)
-                        (call TEST)
-                        (pop %eax)
-                        (jmp BLAH)
-                        (or %eax 4)
-                        (label BLAH)
-                        (shl %eax 4)
-                        (shr %eax 4)
-                        (imul %eax %ebx)
-                        (and %ebx 4)
-                        (ret))))))
+(define (emit-binary l #!optional filename)
+  (with-output-to-port
+    (if filename
+      (open-output-file filename)
+      (current-output-port))
+    (lambda ()
+      (map emit-byte
+           (apply
+             append
+             (assemble l))))))
