@@ -44,19 +44,23 @@
         (run (cp test tmp))
         (with-input-from-string (capture "./tmp; echo $?") (lambda () (read)))))
 
-(emit-binary
-   (assemble-elf `((.text
-                     (mov 1 %ebx)
-                     (mov 4 %eax)
-                     (mov 0 %ecx)
-                     (mov 0 %edx)
-                     (int #x80)
+(test "Hello World!\n"
+      (begin
+        (emit-binary
+          (assemble-elf `((.text
+                            (mov 1 %ebx)
+                            (mov 4 %eax)
+                            (mov #x08048096 %ecx)
+                            (mov 13 %edx)
+                            (int #x80)
 
-                     (mov 1 %eax)
-                     (mov #x5D %ebx)
-                     (int #x80))
-                   (.data
-                     ,(map char->integer '(#\H #\e #\l #\l #\o #\space #\W #\o #\r #\l #\d #\! #\newline))))) "test")
+                            (mov 1 %eax)
+                            (mov #x5D %ebx)
+                            (int #x80))
+                          (.data
+                            ,(map char->integer '(#\H #\e #\l #\l #\o #\space #\W #\o #\r #\l #\d #\! #\newline))))) "test")
+        (run (cp test tmp))
+        (with-input-from-string (capture "./tmp") (lambda () (read-all)))))
 
-(run (rm tmp))
+(run (rm tmp)) ; cleanup
 (test-exit)

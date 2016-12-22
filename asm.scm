@@ -196,16 +196,25 @@
 
 ;;; ELF
 
+(define (get-section section asm)
+  (cond ((assoc section asm) => cdr)
+        (else '())))
+
 (define (assemble-elf asm)
   (define ehdr-size 52) ; elf header size
   (define phdr-size 32)
-  (define phdr-n 1) ; number of program headers
-  (define entry-point #x8048054)
+  (define phdr-n) ; number of program headers
+  (define entry-point)
   ; ELF header
-  (let* ((text (assemble (cdr (assoc '.text asm)))) ; text section
-         (text-size (apply + (map length text))) ; size of text section
-         (data '() ;(cdr (assoc '.data asm))
-                       )
+  (let* ((text (assemble (get-section '.text asm))) ; text section
+         (data (get-section '.data asm))
+
+         (text-size (apply + (map length text)))
+         (data-size (apply + (map length data)))
+
+         (phdr-n (count (lambda (n) (not (null? n))) (list text data)))
+         (entry-point (+ #x8048000 (+ ehdr-size (* phdr-n phdr-size))))
+
          (elf-header (list
                        ;; ident
                        `(#x7F
@@ -249,7 +258,7 @@
                        (u16 phdr-size)
 
                        ;; number of entries in the header table
-                       (u16 1)
+                       (u16 phdr-n)
 
                        ;; section header size in bytes
                        (u16 0)
@@ -259,16 +268,33 @@
 
                        ;; section header table index of entry associated with the section name string table
                        (u16 0)))
-         (program-header-table (list
-                                 (u32 1) ; type (1 = load)
-                                 (u32 (+ ehdr-size (* phdr-n phdr-size))) ; offset
-                                 (u32 entry-point) ; virtual addr
-                                 (u32 0) ; physical addr (unused)
-                                 (u32 text-size) ; size in file
-                                 (u32 text-size) ; size in memory (dunno why these'd be different)
-                                 (u32 (bitwise-ior 1 4)) ; 1 = executible 2 = writeable 4 = readable
-                                 (u32 #x1000)))) ; alignment
-    (append elf-header program-header-table text data)))
+         (program-header-table
+           (append
+             (make-program-header entry-point
+                                  (+ ehdr-size (* phdr-n phdr-size))
+                                  text-size
+                                  (bitwise-ior 1 4)) ; text
+             (if (null? data)
+               '()
+               (make-program-header #x08048096
+                                    (+ ehdr-size (* phdr-n phdr-size) text-size)
+                                    data-size
+                                    4)))))
+    (append elf-header
+            program-header-table
+            text
+            data)))
+
+(define (make-program-header virtual-addr offset sz flags)
+  (list
+    (u32 1) ; type (1 = load)
+    (u32 offset)
+    (u32 virtual-addr)
+    (u32 0) ; physical addr (unused)
+    (u32 sz) ; size in file
+    (u32 sz) ; size in memory (dunno why these'd be different)
+    (u32 flags) ; 1 = executible 2 = writeable 4 = readable
+    (u32 #x1000)))
 
 (define (emit-binary l #!optional filename)
   (with-output-to-port
