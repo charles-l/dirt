@@ -1,5 +1,5 @@
 (load "dirt.scm")
-(use posix utils srfi-13 test)
+(use utils srfi-13 test shell)
 (test
   "6a0368200300008b1989198999fdffffff8999409c000051b80300000089c33d0300000005040000002d409c00003bd80f84e9ffffff0f85faffffffe8deffffff58e90600000081c804000000c1e004c1e8040fafd881e304000000c3"
   (begin
@@ -31,29 +31,32 @@
                   (imul %eax %ebx)
                   (and %ebx 4)
                   (ret))) "test")
-    (system "objdump -D -b binary -mi386 test")
-    (system "") ; uhhh. WUT? Without this, call-with-input-pipe will run before test file has been written???
-    ; this *might* break the 80 character limit...
-    (string-delete #\newline (call-with-input-pipe "xxd -p test" read-all))))
+    (run (cp test tmp))
+    (string-delete #\newline (capture "xxd -p tmp"))))
+
+(test 42
+      (begin
+        (emit-binary
+          (assemble-elf '((.text
+                            (mov 1  %eax)
+                            (mov 42 %ebx)
+                            (int #x80)))) "test")
+        (run (cp test tmp))
+        (with-input-from-string (capture "./tmp; echo $?") (lambda () (read)))))
 
 (emit-binary
-   (assemble-elf '((.text
-                     (mov 1  %eax)
-                     (mov 42 %ebx)
-                     (int #x80)))) "test")
+   (assemble-elf `((.text
+                     (mov 1 %ebx)
+                     (mov 4 %eax)
+                     (mov 0 %ecx)
+                     (mov 0 %edx)
+                     (int #x80)
 
-;(emit-binary
-;   (assemble-elf `((.text
-;                     (mov 1 %ebx)
-;                     (mov 4 %eax)
-;                     (mov 0 %ecx)
-;                     (mov 0 %edx)
-;                     (int #x80)
-;
-;                     (mov 1 %eax)
-;                     (mov #x5D %ebx)
-;                     (int #x80))
-;                   (.data
-;                     ,(map char->integer '(#\H #\e #\l #\l #\o #\space #\W #\o #\r #\l #\d #\! #\newline))))) "test")
+                     (mov 1 %eax)
+                     (mov #x5D %ebx)
+                     (int #x80))
+                   (.data
+                     ,(map char->integer '(#\H #\e #\l #\l #\o #\space #\W #\o #\r #\l #\d #\! #\newline))))) "test")
 
+(run (rm tmp))
 (test-exit)
