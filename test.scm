@@ -38,11 +38,22 @@
 
 (emit-binary
    (assemble-elf '((.text
-                     (mov 5 %eax)
-                     (ret)))) "test")
+                     (mov 1  %eax)
+                     (mov 42 %ebx)
+                     (int #x80)))) "test")
 
-(print
-   (assemble-elf '((.text
-                     (mov 5 %eax)
-                     (ret)))) "test")
+;(emit-binary
+;   (assemble-elf `((.text
+;                     (mov 1 %ebx)
+;                     (mov 4 %eax)
+;                     (mov 0 %ecx)
+;                     (mov 0 %edx)
+;                     (int #x80)
+;
+;                     (mov 1 %eax)
+;                     (mov #x5D %ebx)
+;                     (int #x80))
+;                   (.data
+;                     ,(map char->integer '(#\H #\e #\l #\l #\o #\space #\W #\o #\r #\l #\d #\! #\newline))))) "test")
+
 (test-exit)

@@ -1,7 +1,14 @@
 ;; refs
+; x86 encoding:
 ; http://ref.x86asm.net/
 ; http://bazaar.launchpad.net/~aghuloum/ikarus/ikarus.dev/annotate/head%3A/scheme/ikarus.intel-assembler.ss
 ; https://github.com/noelwelsh/assembler
+; elf:
+; http://wiki.osdev.org/ELF#Header
+; http://wiki.osdev.org/ELF_Tutorial
+; https://web.archive.org/web/20140130143820/http://robinhoksbergen.com/papers/howto_elf.html
+; http://www.muppetlabs.com/~breadbox/software/tiny/teensy.html
+; `man elf`
 
 (use srfi-69 srfi-1)
 
@@ -145,21 +152,25 @@
           `(#x81 ,(modr/m #b100 (reg-code r)) ,@(u32 i)))
 
          (('jmp (? symbol? l))
-          `(5 . ,(delay `(#xE9 ,@(u32 (- (hash-table-ref labels l) byte-len 5))))))
+          ; TODO: find a different way of calculating the size of the program based on u16 and u32
+          (cons 5 (delay `(#xE9 ,@(u32 (- (hash-table-ref labels l) byte-len 5))))))
          (('je (? symbol? l))
-          `(6 . ,(delay `(#x0F #x84 ,@(u32 (- (hash-table-ref labels l) byte-len 6))))))
+          (cons 6 (delay `(#x0F #x84 ,@(u32 (- (hash-table-ref labels l) byte-len 6))))))
          (('jne (? symbol? l))
-          `(6 . ,(delay `(#x0F #x85 ,@(u32 (- (hash-table-ref labels l) byte-len 6))))))
+          (cons 6 (delay `(#x0F #x85 ,@(u32 (- (hash-table-ref labels l) byte-len 6))))))
 
          (('call (? symbol? l))
           ; TODO: handle pointer
-          `(5 . ,(delay `(#xE8 ,@(u32 (- (hash-table-ref labels l) byte-len 5))))))
+          (cons 5 (delay `(#xE8 ,@(u32 (- (hash-table-ref labels l) byte-len 5))))))
 
          (('shl (? reg? r1) (? imm8? i))
           `(#xC1 ,(modr/m #b100 (reg-code r1)) ,i))
 
          (('shr (? reg? r1) (? imm8? r2))
           `(#xC1 ,(modr/m #b101 (reg-code r1)) ,r2))
+
+         (('int (? imm8? i))
+          `(#xCD ,i))
 
          (=>
            (error "failed to parse expression" expr))))
@@ -185,76 +196,79 @@
 
 ;;; ELF
 
-; see `man elf` for more info
 (define (assemble-elf asm)
+  (define ehdr-size 52) ; elf header size
+  (define phdr-size 32)
+  (define phdr-n 1) ; number of program headers
+  (define entry-point #x8048054)
   ; ELF header
-  (define elf-header-size 52) ; size of elf header in bytes
-  (let ((elf-header (list
-                      ;; ident
-                      `(#x7F
-                        ,(char->integer #\E)
-                        ,(char->integer #\L)
-                        ,(char->integer #\F))
-                      `(,(case (cadr (assoc arch arches))
-                           ((32) 1)
-                           ((64) 2)))
-                      '(1) ; little endian
-                      '(1) ; version
-                      '(0) ; abi (0 = sysv)
-                      (make-list 8 0) ; then 8 bytes of padding
+  (let* ((text (assemble (cdr (assoc '.text asm)))) ; text section
+         (text-size (apply + (map length text))) ; size of text section
+         (data '() ;(cdr (assoc '.data asm))
+                       )
+         (elf-header (list
+                       ;; ident
+                       `(#x7F
+                         ,(char->integer #\E)
+                         ,(char->integer #\L)
+                         ,(char->integer #\F))
+                       `(,(case (cadr (assoc arch arches))
+                            ((32) 1)
+                            ((64) 2)))
+                       '(1) ; little endian
+                       '(1) ; version
+                       '(0) ; abi (0 = sysv)
+                       (make-list 8 0) ; then 8 bytes of padding
 
-                      ;; type
-                      (u16 2) ; 2 = static executable (3 for shared)
+                       ;; type
+                       (u16 2) ; 2 = static executable (3 for shared)
 
-                      ;; machine
-                      (u16 (caddr (assoc arch arches)))
+                       ;; machine
+                       (u16 (caddr (assoc arch arches)))
 
-                      ;; version
-                      (u32 1)
+                       ;; version
+                       (u32 1)
 
-                      ;; entry addr (32 bit)
-                      (u32 #x8048060) ; default to this
+                       ;; entry addr (32 bit)
+                       (u32 entry-point) ; default to this
 
-                      ;; program header table offset (32 bit)
-                      (u32 52)
+                       ;; program header table offset (32 bit)
+                       ; located directly after the elf header
+                       (u32 ehdr-size)
 
-                      ;; section header table offset (32 bit)
-                      (u32 0)
+                       ;; section header table offset (32 bit)
+                       (u32 0)
 
-                      ;; flags (none for x86)
-                      (u32 0)
+                       ;; flags (none for x86)
+                       (u32 0)
 
-                      ;; header table size in bytes
-                      (u16 52)
+                       ;; elf header size (bytes)
+                       (u16 ehdr-size)
 
-                      ;; size of header table entry
-                      (u16 32)
+                       ;; size of header table entry (bytes)
+                       (u16 phdr-size)
 
-                      ;; number of entries in the header table
-                      (u16 1)
+                       ;; number of entries in the header table
+                       (u16 1)
 
-                      ;; section header size in bytes
-                      (u16 0)
+                       ;; section header size in bytes
+                       (u16 0)
 
-                      ;; number of entries in the section header table
-                      (u16 0)
+                       ;; number of entries in the section header table
+                       (u16 0)
 
-                      ;; section header table index of entry associated with the section name string table
-                      '(0 0)))
-        (program-header-table (list
-                                (u32 1) ; type
-                                (u32 0) ; offset
-                                (u32 #x0848000) ; virtual addr
-                                (u32 0) ; padding
-                                (u32 102) ; size in file
-                                (u32 102) ; size in memory
-                                (u32 (bitwise-ior 1 4)) ; 1 = executible 4 = readable
-                                (u32 #x1000)
-
-                                ;; offset
-                                '()))
-        (text-section (assemble (cdr (assoc '.text asm)))))
-    (append elf-header program-header-table text-section)))
+                       ;; section header table index of entry associated with the section name string table
+                       (u16 0)))
+         (program-header-table (list
+                                 (u32 1) ; type (1 = load)
+                                 (u32 (+ ehdr-size (* phdr-n phdr-size))) ; offset
+                                 (u32 entry-point) ; virtual addr
+                                 (u32 0) ; physical addr (unused)
+                                 (u32 text-size) ; size in file
+                                 (u32 text-size) ; size in memory (dunno why these'd be different)
+                                 (u32 (bitwise-ior 1 4)) ; 1 = executible 2 = writeable 4 = readable
+                                 (u32 #x1000)))) ; alignment
+    (append elf-header program-header-table text data)))
 
 (define (emit-binary l #!optional filename)
   (with-output-to-port
