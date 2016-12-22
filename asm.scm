@@ -27,13 +27,6 @@
 
 (define labels (make-hash-table))
 
-; allows forward reference of label during first pass
-(define (label-addr labels l byte-len size post-thunk)
-  (cons
-    size
-    (lambda ()
-      (post-thunk (- (hash-table-ref labels l) byte-len size)))))
-
 (define (reg? r)
   (cond ((and (symbol? r) (assoc r regs)) #t)
         (else #f)))
@@ -152,25 +145,15 @@
           `(#x81 ,(modr/m #b100 (reg-code r)) ,@(u32 i)))
 
          (('jmp (? symbol? l))
-          (label-addr labels l byte-len 5
-                      (lambda (addr)
-                        `(#xE9 ,@(u32 addr)))))
-
+          `(5 . ,(delay `(#xE9 ,@(u32 (- (hash-table-ref labels l) byte-len 5))))))
          (('je (? symbol? l))
-          (label-addr labels l byte-len 6
-                      (lambda (addr)
-                        `(#x0F #x84 ,@(u32 addr)))))
-
+          `(6 . ,(delay `(#x0F #x84 ,@(u32 (- (hash-table-ref labels l) byte-len 6))))))
          (('jne (? symbol? l))
-          (label-addr labels l byte-len 6
-                      (lambda (addr)
-                        `(#x0F #x85 ,@(u32 addr)))))
+          `(6 . ,(delay `(#x0F #x85 ,@(u32 (- (hash-table-ref labels l) byte-len 6))))))
 
          (('call (? symbol? l))
           ; TODO: handle pointer
-          (label-addr labels l byte-len 6
-                      (lambda (addr)
-                        `(#xE8 ,@(u32 addr)))))
+          `(5 . ,(delay `(#xE8 ,@(u32 (- (hash-table-ref labels l) byte-len 5))))))
 
          (('shl (? reg? r1) (? imm8? i))
           `(#xC1 ,(modr/m #b100 (reg-code r1)) ,i))
@@ -186,7 +169,7 @@
     (map ; second pass
       (lambda (l)
         (cond
-          ((procedure? l) (l)) ; fill in label addresses
+          ((promise? l) (force l)) ; fill in label addresses
           (else l)))
       (map ; first pass
        (lambda (expr)

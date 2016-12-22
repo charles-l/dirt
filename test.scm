@@ -1,7 +1,7 @@
 (load "dirt.scm")
 (use posix utils srfi-13 test)
 (test
-  "6a0368200300008b1989198999fdffffff8999409c000051b80300000089c33d0300000005040000002d409c00003bd80f84e9ffffff0f85faffffffe8ddffffff58e90600000081c804000000c1e004c1e8040fafd881e304000000c3"
+  "6a0368200300008b1989198999fdffffff8999409c000051b80300000089c33d0300000005040000002d409c00003bd80f84e9ffffff0f85faffffffe8deffffff58e90600000081c804000000c1e004c1e8040fafd881e304000000c3"
   (begin
     (emit-binary
       (assemble '((push 3)
@@ -31,7 +31,7 @@
                   (imul %eax %ebx)
                   (and %ebx 4)
                   (ret))) "test")
-    ;(system "objdump -D -b binary -mi386 test")
+    (system "objdump -D -b binary -mi386 test")
     (system "") ; uhhh. WUT? Without this, call-with-input-pipe will run before test file has been written???
     ; this *might* break the 80 character limit...
     (string-delete #\newline (call-with-input-pipe "xxd -p test" read-all))))
