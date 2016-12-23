@@ -51,7 +51,7 @@
         (else
           (error "not a register" reg))))
 
-;; u32s
+;; i32s
 (define (imm32? x)
   (and (number? x)
        (exact? x)))
@@ -88,13 +88,13 @@
 
 ; little endian 32 bit value
 ; i.e. 4th byte, 3rd byte, 2nd byte, 1st byte
-(define (u32 v)
+(define (i32 v)
   (list (byte v)
         (byte (arithmetic-shift v -8))
         (byte (arithmetic-shift v -16))
         (byte (arithmetic-shift v -24))))
 
-(define (u16 v)
+(define (i16 v)
   (list (byte v)
         (byte (arithmetic-shift v -8))))
 
@@ -105,12 +105,12 @@
     ((imm8? (car m))
      `(,(modr/m (reg-code r) (reg-code (cdr m)) #b01) ,(car m)))
     ((imm32? (car m))
-     `(,(modr/m (reg-code r) (reg-code (cdr m)) #b10) ,@(u32 (car m))))))
+     `(,(modr/m (reg-code r) (reg-code (cdr m)) #b10) ,@(i32 (car m))))))
 
 (define-syntax delay-addr
   (syntax-rules ()
                 ((delay-addr addr)
-                 (delay (u32 addr)))))
+                 (delay (i32 addr)))))
 
 (define (x86 expr addr)
   (match expr
@@ -123,7 +123,7 @@
          (('mov (? mem? m) (? reg? r))
           `(#x8B ,@(mem-access r m)))
          (('mov (? imm32? i) (? reg? r))
-          `(,(code+reg #xB8 r) ,@(u32 i)))
+          `(,(code+reg #xB8 r) ,@(i32 i)))
          (('mov (? label? l) (? reg? r))
           `(,(code+reg #xB8 r) ,(delay-addr (hash-table-ref labels l))))
 
@@ -132,21 +132,21 @@
          (('push (? imm8? i))
           `(#x6A ,i))
          (('push (? imm32? i))
-          `(#x68 ,@(u32 i)))
+          `(#x68 ,@(i32 i)))
 
          (('pop (? reg? r))
           `(,(code+reg #x58 r)))
 
          (('cmp '%eax (? imm32? i))
-          `(#x3D ,@(u32 i)))
+          `(#x3D ,@(i32 i)))
          (('cmp (? reg? r1) (? reg? r2))
           `(#x3B ,(modr/m (reg-code r2) (reg-code r1))))
 
          (('add '%eax (? imm32? i))
-          `(#x05 ,@(u32 i)))
+          `(#x05 ,@(i32 i)))
 
          (('sub '%eax (? imm32? i))
-          `(#x2D ,@(u32 i)))
+          `(#x2D ,@(i32 i)))
 
          (('imul (? reg? r1) (? reg? r2))
           `(#x0F #xAF ,(modr/m (reg-code r2) (reg-code r1))))
@@ -158,20 +158,20 @@
           '())
 
          (('or (? reg? r) (? imm32? i))
-          `(#x81 ,(modr/m #b001 (reg-code r)) ,@(u32 i)))
+          `(#x81 ,(modr/m #b001 (reg-code r)) ,@(i32 i)))
 
          (('and (? reg? r) (? imm32? i))
-          `(#x81 ,(modr/m #b100 (reg-code r)) ,@(u32 i)))
+          `(#x81 ,(modr/m #b100 (reg-code r)) ,@(i32 i)))
 
-         (('jmp (? symbol? l))
-          ; TODO: find a different way of calculating the size of the program based on u16 and u32
-          `(#xE9 ,(delay-addr (- (hash-table-ref labels l) addr 5))))
-         (('je (? symbol? l))
+         (('jmp (? label? l))
+          ; TODO: find a different way of calculating the size of the program based on i16 and i32
+          `(#xE9 ,(delay-addr (- (hash-table-ref labels l) addr 2))))
+         (('je (? label? l))
           `(#x0F #x84 ,(delay-addr (- (hash-table-ref labels l) addr 6))))
-         (('jne (? symbol? l))
+         (('jne (? label? l))
           `(#x0F #x85 ,(delay-addr (- (hash-table-ref labels l) addr 6))))
 
-         (('call (? symbol? l))
+         (('call (? label? l))
           ; TODO: handle pointer
           `(#xE8 ,(delay-addr (- (hash-table-ref labels l) addr 5))))
 
@@ -186,6 +186,8 @@
 
          (('db (? imm8? i) ...)
           i)
+         (('db (? string? s))
+          (map char->integer (string->list s)))
 
          (=>
            (error "failed to parse expression" expr))))
@@ -222,14 +224,13 @@
 (define (assemble-elf asm)
   (define ehdr-size 52) ; elf header size
   (define phdr-size 32) ; progam header size
-  (define phdr-n) ; number of program headers
-  (define entry-point)
+  (define phdr-n (count ; number of program headers
+                   (lambda (n) (not (null? n)))
+                   (map (cut get-section <> asm) '(.data .text))))
+  (define entry-point (+ #x8048000 (+ ehdr-size (* phdr-n phdr-size))))
+  (define data-addr #x08048096)
   ; ELF header
-  (let* ((phdr-n (count (lambda (n) (not (null? n))) (map (cut get-section <> asm) '(.data .text))))
-         (entry-point (+ #x8048000 (+ ehdr-size (* phdr-n phdr-size))))
-         (data-addr #x08048096)
-
-         (data (assemble (get-section '.data asm) data-addr))
+  (let* ((data (assemble (get-section '.data asm) data-addr))
          (text (assemble (get-section '.text asm) entry-point))
 
          (text-size (apply + (map op-len text)))
@@ -251,44 +252,44 @@
                        (make-list 8 0) ; then 8 bytes of padding
 
                        ;; type
-                       (u16 2) ; 2 = static executable (3 for shared)
+                       (i16 2) ; 2 = static executable (3 for shared)
 
                        ;; machine
-                       (u16 (caddr (assoc arch arches)))
+                       (i16 (caddr (assoc arch arches)))
 
                        ;; version
-                       (u32 1)
+                       (i32 1)
 
                        ;; entry addr (32 bit)
-                       (u32 entry-point) ; default to this
+                       (i32 entry-point) ; default to this
 
                        ;; program header table offset (32 bit)
                        ; located directly after the elf header
-                       (u32 ehdr-size)
+                       (i32 ehdr-size)
 
                        ;; section header table offset (32 bit)
-                       (u32 0)
+                       (i32 0)
 
                        ;; flags (none for x86)
-                       (u32 0)
+                       (i32 0)
 
                        ;; elf header size (bytes)
-                       (u16 ehdr-size)
+                       (i16 ehdr-size)
 
                        ;; size of header table entry (bytes)
-                       (u16 phdr-size)
+                       (i16 phdr-size)
 
                        ;; number of entries in the header table
-                       (u16 phdr-n)
+                       (i16 phdr-n)
 
                        ;; section header size in bytes
-                       (u16 0)
+                       (i16 0)
 
                        ;; number of entries in the section header table
-                       (u16 0)
+                       (i16 0)
 
                        ;; section header table index of entry associated with the section name string table
-                       (u16 0)))
+                       (i16 0)))
 
          (program-header-table
            (append
@@ -309,22 +310,22 @@
 
 (define (make-program-header virtual-addr offset sz flags)
   (list
-    (u32 1) ; type (1 = load)
-    (u32 offset)
-    (u32 virtual-addr)
-    (u32 0) ; physical addr (unused)
-    (u32 sz) ; size in file
-    (u32 sz) ; size in memory (dunno why these'd be different)
-    (u32 flags) ; 1 = executible 2 = writeable 4 = readable
-    (u32 #x1000)))
+    (i32 1) ; type (1 = load)
+    (i32 offset)
+    (i32 virtual-addr)
+    (i32 0) ; physical addr (unused)
+    (i32 sz) ; size in file
+    (i32 sz) ; size in memory (dunno why these'd be different)
+    (i32 flags) ; 1 = executible 2 = writeable 4 = readable
+    (i32 #x1000)))
 
-(define (emit-binary l #!optional filename)
-  (with-output-to-port
-    (if filename
-      (open-output-file filename)
-      (current-output-port))
-    (lambda ()
-      (map emit-byte
-           (apply
-             append
-             l)))))
+(define (emit-binary l filename)
+  (let ((p (open-output-file filename)))
+    (with-output-to-port
+      p
+      (lambda ()
+        (map emit-byte
+             (apply
+               append
+               l))))
+    (close-output-port p)))
