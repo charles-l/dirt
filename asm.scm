@@ -78,9 +78,9 @@
   (bitwise-and #xFF val))
 
 ; http://wiki.osdev.org/X86-64_Instruction_Encoding#ModR.2FM_and_SIB_bytes
-(define (modr/m reg rm #!optional mod)
+(define (modr/m reg rm #!optional (mod #b11))
   (bitwise-ior
-    (arithmetic-shift (or mod #b11) 6) ; default to register-direct addressing mode
+    (arithmetic-shift mod 6) ; default to register-direct addressing mode
     (arithmetic-shift reg 3)
     rm))
 
@@ -105,7 +105,7 @@
     ((imm32? (car m))
      `(,(modr/m (reg-code r) (reg-code (cdr m)) #b10) ,@(u32 (car m))))))
 
-(define (x86 expr byte-len)
+(define (x86 expr addr)
   (match expr
          (('ret)
           `(#xC3))
@@ -147,7 +147,7 @@
          (('label (? symbol? l))
           (if (hash-table-ref/default labels l #f)
             (error "label already defined" l)
-            (hash-table-set! labels l byte-len))
+            (hash-table-set! labels l addr))
           '())
 
          (('or (? reg? r) (? imm32? i))
@@ -158,15 +158,15 @@
 
          (('jmp (? symbol? l))
           ; TODO: find a different way of calculating the size of the program based on u16 and u32
-          (cons 5 (delay `(#xE9 ,@(u32 (- (hash-table-ref labels l) byte-len 5))))))
+          (cons 5 (delay `(#xE9 ,@(u32 (- (hash-table-ref labels l) addr 5))))))
          (('je (? symbol? l))
-          (cons 6 (delay `(#x0F #x84 ,@(u32 (- (hash-table-ref labels l) byte-len 6))))))
+          (cons 6 (delay `(#x0F #x84 ,@(u32 (- (hash-table-ref labels l) addr 6))))))
          (('jne (? symbol? l))
-          (cons 6 (delay `(#x0F #x85 ,@(u32 (- (hash-table-ref labels l) byte-len 6))))))
+          (cons 6 (delay `(#x0F #x85 ,@(u32 (- (hash-table-ref labels l) addr 6))))))
 
          (('call (? symbol? l))
           ; TODO: handle pointer
-          (cons 5 (delay `(#xE8 ,@(u32 (- (hash-table-ref labels l) byte-len 5))))))
+          (cons 5 (delay `(#xE8 ,@(u32 (- (hash-table-ref labels l) addr 5))))))
 
          (('shl (? reg? r1) (? imm8? i))
           `(#xC1 ,(modr/m #b100 (reg-code r1)) ,i))
@@ -183,8 +183,8 @@
          (=>
            (error "failed to parse expression" expr))))
 
-(define (assemble asm)
-  (let ((byte-len 0))
+(define (assemble asm #!optional (start-addr 0))
+  (let ((addr start-addr))
     (map ; second pass
       (lambda (l)
         (cond
@@ -192,13 +192,13 @@
           (else l)))
       (map ; first pass
        (lambda (expr)
-         (let ((o (x86 expr byte-len)))
+         (let ((o (x86 expr addr)))
            (cond
              ((not (list? o))
-              (set! byte-len (+ byte-len (car o)))
+              (set! addr (+ addr (car o)))
               (cdr o))
              (else
-               (set! byte-len (+ byte-len (length o)))
+               (set! addr (+ addr (length o)))
                o))))
        asm))))
 
@@ -210,18 +210,20 @@
 
 (define (assemble-elf asm)
   (define ehdr-size 52) ; elf header size
-  (define phdr-size 32)
+  (define phdr-size 32) ; progam header size
   (define phdr-n) ; number of program headers
   (define entry-point)
   ; ELF header
-  (let* ((data (assemble (get-section '.data asm)))
-         (text (assemble (get-section '.text asm))) ; text section
+  (let* ((phdr-n (count (lambda (n) (not (null? n))) (map (cut get-section <> asm) '(.data .text))))
+         (entry-point (+ #x8048000 (+ ehdr-size (* phdr-n phdr-size))))
+         (data-addr #x08048096)
+
+         (data (assemble (get-section '.data asm) data-addr))
+         (text (assemble (get-section '.text asm) entry-point))
 
          (text-size (apply + (map length text)))
          (data-size (apply + (map length data)))
 
-         (phdr-n (count (lambda (n) (not (null? n))) (list text data)))
-         (entry-point (+ #x8048000 (+ ehdr-size (* phdr-n phdr-size))))
 
          (elf-header (list
                        ;; ident
@@ -285,7 +287,7 @@
                                   (bitwise-ior 1 4)) ; text
              (if (null? data)
                '()
-               (make-program-header #x08048096
+               (make-program-header data-addr
                                     (+ ehdr-size (* phdr-n phdr-size) text-size)
                                     data-size
                                     4)))))
