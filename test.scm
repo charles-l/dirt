@@ -58,7 +58,7 @@
                             (mov #x5D %ebx)
                             (int #x80))
                           (.data
-                            ,(map char->integer '(#\H #\e #\l #\l #\o #\space #\W #\o #\r #\l #\d #\! #\newline))))) "test")
+                            (db ,@(map char->integer '(#\H #\e #\l #\l #\o #\space #\W #\o #\r #\l #\d #\! #\newline)))))) "test")
         (run (cp test tmp))
         (with-input-from-string (capture "./tmp") (lambda () (read-all)))))
 

@@ -38,6 +38,9 @@
   (cond ((and (symbol? r) (assoc r regs)) #t)
         (else #f)))
 
+(define (label? l)
+  (and (not (reg? l)) (symbol? l)))
+
 (define (mem? t)
   (pair? t))
 
@@ -114,6 +117,8 @@
           `(#x8B ,@(mem-access r m)))
          (('mov (? imm32? i) (? reg? r))
           `(,(code+reg #xB8 r) ,@(u32 i)))
+         (('mov (? label? l) (? reg? r))
+          (cons 5 (delay `(,(code+reg #xB8 r) ,@(u32 (hash-table-ref labels l))))))
 
          (('push (? reg? r))
           `(,(code+reg #x50 r)))
@@ -172,6 +177,9 @@
          (('int (? imm8? i))
           `(#xCD ,i))
 
+         (('db (? imm8? i) ...)
+          i)
+
          (=>
            (error "failed to parse expression" expr))))
 
@@ -206,8 +214,8 @@
   (define phdr-n) ; number of program headers
   (define entry-point)
   ; ELF header
-  (let* ((text (assemble (get-section '.text asm))) ; text section
-         (data (get-section '.data asm))
+  (let* ((data (assemble (get-section '.data asm)))
+         (text (assemble (get-section '.text asm))) ; text section
 
          (text-size (apply + (map length text)))
          (data-size (apply + (map length data)))
@@ -268,6 +276,7 @@
 
                        ;; section header table index of entry associated with the section name string table
                        (u16 0)))
+
          (program-header-table
            (append
              (make-program-header entry-point
