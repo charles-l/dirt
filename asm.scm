@@ -32,6 +32,8 @@
 
 (define arch 'i386)
 
+(define addr-len (/ (cadr (assoc arch arches)) 8))
+
 (define labels (make-hash-table))
 
 (define (reg? r)
@@ -105,6 +107,11 @@
     ((imm32? (car m))
      `(,(modr/m (reg-code r) (reg-code (cdr m)) #b10) ,@(u32 (car m))))))
 
+(define-syntax delay-addr
+  (syntax-rules ()
+                ((delay-addr addr)
+                 (delay (u32 addr)))))
+
 (define (x86 expr addr)
   (match expr
          (('ret)
@@ -118,7 +125,7 @@
          (('mov (? imm32? i) (? reg? r))
           `(,(code+reg #xB8 r) ,@(u32 i)))
          (('mov (? label? l) (? reg? r))
-          (cons 5 (delay `(,(code+reg #xB8 r) ,@(u32 (hash-table-ref labels l))))))
+          `(,(code+reg #xB8 r) ,(delay-addr (hash-table-ref labels l))))
 
          (('push (? reg? r))
           `(,(code+reg #x50 r)))
@@ -158,15 +165,15 @@
 
          (('jmp (? symbol? l))
           ; TODO: find a different way of calculating the size of the program based on u16 and u32
-          (cons 5 (delay `(#xE9 ,@(u32 (- (hash-table-ref labels l) addr 5))))))
+          `(#xE9 ,(delay-addr (- (hash-table-ref labels l) addr 5))))
          (('je (? symbol? l))
-          (cons 6 (delay `(#x0F #x84 ,@(u32 (- (hash-table-ref labels l) addr 6))))))
+          `(#x0F #x84 ,(delay-addr (- (hash-table-ref labels l) addr 6))))
          (('jne (? symbol? l))
-          (cons 6 (delay `(#x0F #x85 ,@(u32 (- (hash-table-ref labels l) addr 6))))))
+          `(#x0F #x85 ,(delay-addr (- (hash-table-ref labels l) addr 6))))
 
          (('call (? symbol? l))
           ; TODO: handle pointer
-          (cons 5 (delay `(#xE8 ,@(u32 (- (hash-table-ref labels l) addr 5))))))
+          `(#xE8 ,(delay-addr (- (hash-table-ref labels l) addr 5))))
 
          (('shl (? reg? r1) (? imm8? i))
           `(#xC1 ,(modr/m #b100 (reg-code r1)) ,i))
@@ -183,24 +190,28 @@
          (=>
            (error "failed to parse expression" expr))))
 
+(define (op-len o)
+  (cond
+    ((list? o) (length o))
+    ; NOTE: currently assuming all promises are addresses
+    ((promise? o) addr-len)))
+
 (define (assemble asm #!optional (start-addr 0))
   (let ((addr start-addr))
     (map ; second pass
       (lambda (l)
-        (cond
-          ((promise? l) (force l)) ; fill in label addresses
-          (else l)))
+        (append-map
+          (lambda (o)
+            (cond
+              ((promise? o)
+               (force o)) ; fill in addresses
+              (else (list o)))) l))
       (map ; first pass
-       (lambda (expr)
-         (let ((o (x86 expr addr)))
-           (cond
-             ((not (list? o))
-              (set! addr (+ addr (car o)))
-              (cdr o))
-             (else
-               (set! addr (+ addr (length o)))
-               o))))
-       asm))))
+        (lambda (expr)
+          (let ((o (x86 expr addr)))
+            (set! addr (+ addr (op-len o)))
+            o))
+        asm))))
 
 ;;; ELF
 
@@ -221,8 +232,8 @@
          (data (assemble (get-section '.data asm) data-addr))
          (text (assemble (get-section '.text asm) entry-point))
 
-         (text-size (apply + (map length text)))
-         (data-size (apply + (map length data)))
+         (text-size (apply + (map op-len text)))
+         (data-size (apply + (map op-len data)))
 
 
          (elf-header (list
