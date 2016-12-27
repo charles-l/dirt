@@ -165,14 +165,13 @@
 
          (('jmp (? label? l))
           ; TODO: find a different way of calculating the size of the program based on i16 and i32
-          `(#xE9 ,(delay-addr (- (hash-table-ref labels l) addr 2))))
+          `(#xE9 ,(delay-addr (- (hash-table-ref labels l) addr 5))))
          (('je (? label? l))
           `(#x0F #x84 ,(delay-addr (- (hash-table-ref labels l) addr 6))))
          (('jne (? label? l))
           `(#x0F #x85 ,(delay-addr (- (hash-table-ref labels l) addr 6))))
 
-         (('call (? label? l))
-          ; TODO: handle pointer
+         (('call (? label? l)) ; TODO: handle pointer
           `(#xE8 ,(delay-addr (- (hash-table-ref labels l) addr 5))))
 
          (('shl (? reg? r1) (? imm8? i))
@@ -193,10 +192,9 @@
            (error "failed to parse expression" expr))))
 
 (define (op-len o)
-  (cond
-    ((list? o) (length o))
-    ; NOTE: currently assuming all promises are addresses
-    ((promise? o) addr-len)))
+  (+ (count (lambda (n) (not (promise? n))) o)
+     ; all promises return a 4 byte address
+     (* 4 (count promise? o))))
 
 (define (assemble asm #!optional (start-addr 0))
   (let ((addr start-addr))

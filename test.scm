@@ -1,7 +1,10 @@
 (load "dirt.scm")
-(use utils srfi-13 test shell)
+(use utils srfi-13 test)
+
+(define (objdump) (shell "objdump -D -mi386 -b binary test"))
+
 (test
-  "6a0368200300008b1989198999fdffffff8999409c000051b80300000089c33d0300000005040000002d409c00003bd85881c804000000c1e004c1e8040fafd881e304000000c3"
+  "6a0368200300008b1989198999fdffffff8999409c000051b80300000089c33d0300000005040000002d409c00003bd80f84e9ffffffe8fbffffff0f85f5ffffff58e90600000081c804000000c1e004c1e8040fafd881e304000000c3"
   (begin
     (emit-binary
       (assemble '((push 3)
@@ -18,12 +21,12 @@
                   (add %eax 4)
                   (sub %eax 40000)
                   (cmp %eax %ebx)
-                  ;(je TEST) <- jumps are currently broken: TODO: FIX
+                  (je TEST)
                   (label FOO)
-                  ;(jne FOO)
-                  ;(call TEST)
+                  (call FOO)
+                  (jne FOO)
                   (pop %eax)
-                  ;(jmp BLAH)
+                  (jmp BLAH)
                   (or %eax 4)
                   (label BLAH)
                   (shl %eax 4)
@@ -31,7 +34,7 @@
                   (imul %eax %ebx)
                   (and %ebx 4)
                   (ret))) "test")
-    (string-delete #\newline (capture "xxd -p test"))))
+    (string-delete #\newline (call-with-input-pipe "xxd -p test" read-all))))
 
 (test 42
       (begin
@@ -40,7 +43,7 @@
                             (mov 1  %eax)
                             (mov 42 %ebx)
                             (int #x80)))) "test")
-        (with-input-from-string (capture "./test; echo $?") (lambda () (read)))))
+        (call-with-input-pipe "./test; echo $?" read)))
 
 (test "Hello World!\n"
       (begin
@@ -58,7 +61,7 @@
                           (.data
                             (label msg)
                             (db "Hello World!\n")))) "test")
-        (with-input-from-string (capture "./test") (lambda () (read-all)))))
+        (call-with-input-pipe "./test" read-all)))
 
 (test "Hello Dudes!\n"
       (begin
@@ -78,6 +81,6 @@
                             (db #x12 #x13 #x14)
                             (label msg2)
                             (db "Hello Dudes!\n")))) "test")
-        (with-input-from-string (capture "./test") (lambda () (read-all)))))
+        (call-with-input-pipe "./test" read-all)))
 
 (test-exit)
