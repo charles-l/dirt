@@ -1,21 +1,25 @@
 (load "dirt.scm")
 (use utils srfi-13 test)
 
-(define (objdump) (shell "objdump -D -mi386 -b binary test"))
+(define (objdump) (system "objdump -D -mi386 -b binary test"))
 
 (test
-  "6a0368200300008b1989198999fdffffff8999409c000051b80300000089c33d0300000005040000002d409c00003bd80f84e9ffffffe8fbffffff0f85f5ffffff58e90600000081c804000000c1e004c1e8040fafd881e304000000c3"
+  "6a0368200300008b198b24248b0c248b6d008b450089198999fdffffff8999409c000051b80300000089c33d0300000005040000002d409c00003bd80f84e9ffffffe8fbffffff0f85f5ffffff58e90600000081c804000000c1e004c1e8040fafd881e304000000c3"
   (begin
     (emit-binary
       (assemble '((pushb 3)
                   (pushw 800)
-                  (mov (0 . %ecx) %ebx)
-                  (mov %ebx (0 . %ecx))
-                  (mov %ebx (-3 . %ecx))
-                  (mov %ebx (40000 . %ecx))
+                  (movw (0 . %ecx) %ebx)
+                  (movw (0 . %esp) %esp)
+                  (movw (0 . %esp) %ecx)
+                  (movw (0 . %ebp) %ebp)
+                  (movw (0 . %ebp) %eax)
+                  (movw %ebx (0 . %ecx))
+                  (movw %ebx (-3 . %ecx))
+                  (movw %ebx (40000 . %ecx))
                   (pushw %ecx)
-                  (mov 3 %eax)
-                  (mov %eax %ebx)
+                  (movw 3 %eax)
+                  (movw %eax %ebx)
                   (label TEST)
                   (cmp %eax 3)
                   (add %eax 4)
@@ -40,8 +44,8 @@
       (begin
         (emit-binary
           (assemble-elf '((.text
-                            (mov 1  %eax)
-                            (mov 42 %ebx)
+                            (movw 1  %eax)
+                            (movw 42 %ebx)
                             (int #x80)))) "test")
         (call-with-input-pipe "./test; echo $?" read)))
 
@@ -49,14 +53,14 @@
       (begin
         (emit-binary
           (assemble-elf `((.text
-                            (mov 1 %ebx)
-                            (mov 4 %eax)
-                            (mov msg %ecx)
-                            (mov 13 %edx)
+                            (movw 1 %ebx)
+                            (movw 4 %eax)
+                            (movw msg %ecx)
+                            (movw 13 %edx)
                             (int #x80)
 
-                            (mov 1 %eax)
-                            (mov #x5D %ebx)
+                            (movw 1 %eax)
+                            (movw #x5D %ebx)
                             (int #x80))
                           (.data
                             (label msg)
@@ -67,14 +71,14 @@
       (begin
         (emit-binary
           (assemble-elf `((.text
-                            (mov 1 %ebx)
-                            (mov 4 %eax)
-                            (mov msg2 %ecx)
-                            (mov 13 %edx)
+                            (movw 1 %ebx)
+                            (movw 4 %eax)
+                            (movw msg2 %ecx)
+                            (movw 13 %edx)
                             (int #x80)
 
-                            (mov 1 %eax)
-                            (mov #x5D %ebx)
+                            (movw 1 %eax)
+                            (movw #x5D %ebx)
                             (int #x80))
                           (.data
                             (label some-data)
@@ -90,7 +94,7 @@
 
 (test 0
       (begin
-        (emit-binary (assemble-elf (compile '((def a : i32)
+        (emit-binary (assemble-elf (compile '((def a : word)
                                               (ref a)))) "test")
         (call-with-input-pipe "./test; echo $?" read)))
 

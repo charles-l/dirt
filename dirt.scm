@@ -2,21 +2,17 @@
 (load "asm.scm")
 
 (define (emit-exit)
-  '((mov %eax %ebx)
-    (mov 1 %eax)
+  '((movw %eax %ebx)
+    (movw 1 %eax)
     (int #x80)))
-
-(define (emit-prelude)
-  '((mov #xFFFFFFFF %esp)))
 
 (define (compile prog)
   (define env (make-parameter '()))
   `((.text
-      ,@(emit-prelude)
       ,@(map (cut compile-expr <> env) prog)
       ,@(emit-exit))))
 
-(define (i32? a)
+(define (word? a)
   (and (exact? a)))
 
 (define (lookup env v)
@@ -32,10 +28,10 @@
 
 (define (compile-expr expr env)
   (match expr
-         (((? i32? a))
-          `(mov ,a %eax))
+         (((? word? a))
+          `(movw ,a %eax))
          (('def name : type)
           (env (cons (def-var type name (length (env))) (env)))
           `(pushw 0))
          (('ref var)
-          `(mov ,(cons (- (lookup-si env var)) '%esp) %eax))))
+          `(movw ,(cons (- (lookup-si env var)) '%esp) %eax))))

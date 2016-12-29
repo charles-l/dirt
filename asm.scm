@@ -10,7 +10,7 @@
 ; http://www.muppetlabs.com/~breadbox/software/tiny/teensy.html
 ; `man elf`
 
-(use srfi-69 srfi-1)
+(use srfi-69 srfi-1 matchable)
 
 (define regs
   ;  name  width  code
@@ -100,6 +100,10 @@
 
 (define (mem-access r m)
   (cond
+    ((and (eq? (cdr m) '%ebp) (zero? (car m)))
+     `(,(modr/m (reg-code r) (reg-code '%ebp) #b01) 0))
+    ((and (eq? (cdr m) '%esp) (zero? (car m)))
+     `(,(modr/m (reg-code r) (reg-code (cdr m)) #b00) ,(modr/m (reg-code '%esp) (reg-code '%esp) #b00)))
     ((zero? (car m))
      `(,(modr/m (reg-code r) (reg-code (cdr m)) #b00)))
     ((imm8? (car m))
@@ -116,15 +120,15 @@
   (match expr
          (('ret)
           `(#xC3))
-         (('mov (? reg? r1) (? reg? r2))
+         (('movw (? reg? r1) (? reg? r2))
           `(#x89 ,(modr/m (reg-code r1) (reg-code r2))))
-         (('mov (? reg? r) (? mem? m))
+         (('movw (? reg? r) (? mem? m))
           `(#x89 ,@(mem-access r m)))
-         (('mov (? mem? m) (? reg? r))
+         (('movw (? mem? m) (? reg? r))
           `(#x8B ,@(mem-access r m)))
-         (('mov (? imm32? i) (? reg? r))
+         (('movw (? imm32? i) (? reg? r))
           `(,(code+reg #xB8 r) ,@(i32 i)))
-         (('mov (? label? l) (? reg? r))
+         (('movw (? label? l) (? reg? r))
           `(,(code+reg #xB8 r) ,(delay-addr (hash-table-ref labels l))))
 
          (('pushb (? imm8? i))
