@@ -4,7 +4,7 @@
 (define (objdump) (system "objdump -D -mi386 -b binary test"))
 
 (test
-  "6a0368200300008b198b24248b0c248b6d008b450089198999fdffffff8999409c000051b80300000089c33d0300000005040000002d409c00003bd80f84e9ffffffe8fbffffff0f85f5ffffff58e90600000081c804000000c1e004c1e8040fafd881e304000000c3"
+  "6a0368200300008b198b24248b0c248b6d008b45008b44240489198999fdffffff8999409c000051b80300000089c33d0300000005040000002d409c00003bd80f84e9ffffffe8fbffffff0f85f5ffffff58e90600000081c804000000c1e004c1e8040fafd881e304000000c3"
   (begin
     (emit-binary
       (assemble '((pushb 3)
@@ -14,6 +14,7 @@
                   (movw (0 . %esp) %ecx)
                   (movw (0 . %ebp) %ebp)
                   (movw (0 . %ebp) %eax)
+                  (movw (4 . %esp) %eax)
                   (movw %ebx (0 . %ecx))
                   (movw %ebx (-3 . %ecx))
                   (movw %ebx (40000 . %ecx))
@@ -94,7 +95,14 @@
 
 (test 0
       (begin
-        (emit-binary (assemble-elf (compile '((def a : word)
+        (emit-binary (assemble-elf (compile '((def a : w)
+                                              (ref a)))) "test")
+        (call-with-input-pipe "./test; echo $?" read)))
+
+(test 3
+      (begin
+        (emit-binary (assemble-elf (compile '((def a : w 3)
+                                              (def c : b 27)
                                               (ref a)))) "test")
         (call-with-input-pipe "./test; echo $?" read)))
 

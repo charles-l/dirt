@@ -104,6 +104,8 @@
      `(,(modr/m (reg-code r) (reg-code '%ebp) #b01) 0))
     ((and (eq? (cdr m) '%esp) (zero? (car m)))
      `(,(modr/m (reg-code r) (reg-code (cdr m)) #b00) ,(modr/m (reg-code '%esp) (reg-code '%esp) #b00)))
+    ((and (eq? (cdr m) '%esp))
+     `(,(modr/m (reg-code r) (reg-code (cdr m)) #b01) ,(modr/m (reg-code '%esp) (reg-code '%esp) #b00) ,(car m)))
     ((zero? (car m))
      `(,(modr/m (reg-code r) (reg-code (cdr m)) #b00)))
     ((imm8? (car m))
