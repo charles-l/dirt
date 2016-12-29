@@ -74,7 +74,7 @@
           (assemble-elf `((.text
                             (movw 1 %ebx)
                             (movw 4 %eax)
-                            (movw msg2 %ecx)
+                            (movw msg %ecx)
                             (movw 13 %edx)
                             (int #x80)
 
@@ -84,7 +84,7 @@
                           (.data
                             (label some-data)
                             (db #x12 #x13 #x14)
-                            (label msg2)
+                            (label msg)
                             (db "Hello Dudes!\n")))) "test")
         (call-with-input-pipe "./test" read-all)))
 
@@ -117,8 +117,8 @@
 
 (test "A"
       (begin
-        (emit-binary (assemble-elf (compile '((def a : b 65)
-                                              (ref a)
+        (emit-binary (assemble-elf (compile '((def char : b 65)
+                                              (ref char)
                                               (asm movw %eax %ecx)
                                               (asm movw 1 %ebx)
                                               (asm movw 4 %eax)

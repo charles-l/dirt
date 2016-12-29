@@ -60,7 +60,7 @@
           (stack (cons (def-var type name) (stack)))
           `((pushw ,val)))
          (('def name : type) ; alias
-          (compile-expr `(,@expr 0) stack))
+          (compile-expr (append expr '(0)) stack))
 
          (('asm o ...)
           `(,o))

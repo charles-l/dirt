@@ -34,8 +34,6 @@
 
 (define addr-len (/ (cadr (assoc arch arches)) 8))
 
-(define labels (make-hash-table))
-
 (define (reg? r)
   (cond ((and (symbol? r) (assoc r regs)) #t)
         (else #f)))
@@ -118,7 +116,7 @@
                 ((delay-addr addr)
                  (delay (i32 addr)))))
 
-(define (x86 expr addr)
+(define (x86 expr addr labels)
   (match expr
          (('ret)
           `(#xC3))
@@ -131,7 +129,7 @@
          (('movw (? imm32? i) (? reg? r))
           `(,(code+reg #xB8 r) ,@(i32 i)))
          (('movw (? label? l) (? reg? r))
-          `(,(code+reg #xB8 r) ,(delay-addr (hash-table-ref labels l))))
+          `(,(code+reg #xB8 r) ,(delay-addr (hash-table-ref (labels) l))))
 
          (('pushb (? imm8? i))
           `(#x6A ,i))
@@ -159,9 +157,9 @@
           `(#x0F #xAF ,(modr/m (reg-code r2) (reg-code r1))))
 
          (('label (? symbol? l))
-          (if (hash-table-ref/default labels l #f)
+          (if (hash-table-ref/default (labels) l #f)
             (error "label already defined" l)
-            (hash-table-set! labels l addr))
+            (hash-table-set! (labels) l addr))
           '())
 
          (('or (? reg? r) (? imm32? i))
@@ -172,14 +170,14 @@
 
          (('jmp (? label? l))
           ; TODO: find a different way of calculating the size of the program based on i16 and i32
-          `(#xE9 ,(delay-addr (- (hash-table-ref labels l) addr 5))))
+          `(#xE9 ,(delay-addr (- (hash-table-ref (labels) l) addr 5))))
          (('je (? label? l))
-          `(#x0F #x84 ,(delay-addr (- (hash-table-ref labels l) addr 6))))
+          `(#x0F #x84 ,(delay-addr (- (hash-table-ref (labels) l) addr 6))))
          (('jne (? label? l))
-          `(#x0F #x85 ,(delay-addr (- (hash-table-ref labels l) addr 6))))
+          `(#x0F #x85 ,(delay-addr (- (hash-table-ref (labels) l) addr 6))))
 
          (('call (? label? l)) ; TODO: handle pointer
-          `(#xE8 ,(delay-addr (- (hash-table-ref labels l) addr 5))))
+          `(#xE8 ,(delay-addr (- (hash-table-ref (labels) l) addr 5))))
 
          (('shl (? reg? r1) (? imm8? i))
           `(#xC1 ,(modr/m #b100 (reg-code r1)) ,i))
@@ -203,7 +201,7 @@
      ; all promises return a 4 byte address
      (* 4 (count promise? o))))
 
-(define (assemble asm #!optional (start-addr 0))
+(define (assemble asm #!optional (labels (make-parameter (make-hash-table))) (start-addr 0))
   (let ((addr start-addr))
     (map ; second pass
       (lambda (l)
@@ -215,7 +213,7 @@
               (else (list o)))) l))
       (map ; first pass
         (lambda (expr)
-          (let ((o (x86 expr addr)))
+          (let ((o (x86 expr addr labels)))
             (set! addr (+ addr (op-len o)))
             o))
         asm))))
@@ -234,9 +232,10 @@
                    (map (cut get-section <> asm) '(.data .text))))
   (define entry-point (+ #x8048000 (+ ehdr-size (* phdr-n phdr-size))))
   (define data-addr #x08048096)
+  (define labels (make-parameter (make-hash-table)))
   ; ELF header
-  (let* ((data (assemble (get-section '.data asm) data-addr))
-         (text (assemble (get-section '.text asm) entry-point))
+  (let* ((data (assemble (get-section '.data asm) labels data-addr))
+         (text (assemble (get-section '.text asm) labels entry-point))
 
          (text-size (apply + (map op-len text)))
          (data-size (apply + (map op-len data)))
