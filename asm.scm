@@ -6,7 +6,8 @@
 ; elf:
 ; http://wiki.osdev.org/ELF#Header
 ; http://wiki.osdev.org/ELF_Tutorial
-; https://web.archive.org/web/20140130143820/http://robinhoksbergen.com/papers/howto_elf.html
+; https://web.archive.org/web/20140130143820/
+; http://robinhoksbergen.com/papers/howto_elf.html
 ; http://www.muppetlabs.com/~breadbox/software/tiny/teensy.html
 ; `man elf`
 
@@ -231,7 +232,7 @@
                    (lambda (n) (not (null? n)))
                    (map (cut get-section <> asm) '(.data .text))))
   (define entry-point (+ #x8048000 (+ ehdr-size (* phdr-n phdr-size))))
-  (define data-addr #x08048096)
+  (define data-addr #x08048200)
   (define labels (make-parameter (make-hash-table)))
   ; ELF header
   (let* ((data (assemble (get-section '.data asm) labels data-addr))
@@ -240,6 +241,25 @@
          (text-size (apply + (map op-len text)))
          (data-size (apply + (map op-len data)))
 
+         ;; HOLY CRAP
+         ;; TODO FIXME FIXME FIXME OH SO GROSS
+         (data-addr (+ entry-point text-size))
+
+         (labels (make-parameter (make-hash-table)))
+
+         ;; OH WHY MUST IT BE DONE TWICE?! WHY?!?!!!
+         (data (assemble (get-section '.data asm) labels data-addr))
+         ;; MY EYES...
+         (text (assemble (get-section '.text asm) labels entry-point))
+         ;; ...THEY BLEEEEEEEEDDDD
+
+         ;; AT LEAST IT WORKS - BUT AT WHAT COST?!
+         ;; MUST WE SACRIFICE HUMANITY FOR RUNNABLE CODE?
+         ;; MY HEART LAMENTS
+         ;; MY SOUL GROANS
+         ;; MY BRAIN TREMBLES
+         ;; I REGRET IT ALL
+         ;; PLZ FIXME AS SOON AS POSSIBLE
 
          (elf-header (list
                        ;; ident

@@ -71,7 +71,7 @@
 (test "Hello Dudes!\n"
       (begin
         (emit-binary
-          (assemble-elf `((.text
+          (assemble-elf '((.text
                             (movw 1 %ebx)
                             (movw 4 %eax)
                             (movw msg %ecx)
@@ -123,6 +123,16 @@
                                               (asm movw 1 %ebx)
                                               (asm movw 4 %eax)
                                               (asm movw 1 %edx)
+                                              (asm int #x80)))) "test")
+        (call-with-input-pipe "./test" read-all)))
+
+(test "heyo world!"
+      (begin
+        (emit-binary (assemble-elf (compile '((data msg "heyo world!")
+                                              (asm movw msg %ecx)
+                                              (asm movw 1 %ebx)
+                                              (asm movw 4 %eax)
+                                              (asm movw 11 %edx)
                                               (asm int #x80)))) "test")
         (call-with-input-pipe "./test" read-all)))
 
