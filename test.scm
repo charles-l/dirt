@@ -23,7 +23,7 @@
                   (movw %eax %ebx)
                   (label TEST)
                   (cmp %eax 3)
-                  (add %eax 4)
+                  (addw %eax 4)
                   (sub %eax 40000)
                   (cmp %eax %ebx)
                   (je TEST)
@@ -96,14 +96,34 @@
 (test 0
       (begin
         (emit-binary (assemble-elf (compile '((def a : w)
-                                              (ref a)))) "test")
+                                              (val a)))) "test")
         (call-with-input-pipe "./test; echo $?" read)))
 
 (test 3
       (begin
         (emit-binary (assemble-elf (compile '((def a : w 3)
                                               (def c : b 27)
-                                              (ref a)))) "test")
+                                              (def d : w 800)
+                                              (val a)))) "test")
         (call-with-input-pipe "./test; echo $?" read)))
+
+(test 80
+      (begin
+        (emit-binary (assemble-elf (compile '((def a : w 3)
+                                              (def c : b 27)
+                                              (def d : w 80)
+                                              (val d)))) "test")
+        (call-with-input-pipe "./test; echo $?" read)))
+
+(test "A"
+      (begin
+        (emit-binary (assemble-elf (compile '((def a : b 65)
+                                              (ref a)
+                                              (asm movw %eax %ecx)
+                                              (asm movw 1 %ebx)
+                                              (asm movw 4 %eax)
+                                              (asm movw 1 %edx)
+                                              (asm int #x80)))) "test")
+        (call-with-input-pipe "./test" read-all)))
 
 (test-exit)

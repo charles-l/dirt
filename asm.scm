@@ -149,7 +149,7 @@
          (('cmp (? reg? r1) (? reg? r2))
           `(#x3B ,(modr/m (reg-code r2) (reg-code r1))))
 
-         (('add '%eax (? imm32? i))
+         (('addw '%eax (? imm32? i))
           `(#x05 ,@(i32 i)))
 
          (('sub '%eax (? imm32? i))
