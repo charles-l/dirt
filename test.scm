@@ -7,13 +7,13 @@
   "6a0368200300008b1989198999fdffffff8999409c000051b80300000089c33d0300000005040000002d409c00003bd80f84e9ffffffe8fbffffff0f85f5ffffff58e90600000081c804000000c1e004c1e8040fafd881e304000000c3"
   (begin
     (emit-binary
-      (assemble '((push 3)
-                  (push 800)
-                  (mov (%ecx) %ebx)
-                  (mov %ebx (%ecx))
+      (assemble '((pushb 3)
+                  (pushw 800)
+                  (mov (0 . %ecx) %ebx)
+                  (mov %ebx (0 . %ecx))
                   (mov %ebx (-3 . %ecx))
                   (mov %ebx (40000 . %ecx))
-                  (push %ecx)
+                  (pushw %ecx)
                   (mov 3 %eax)
                   (mov %eax %ebx)
                   (label TEST)
@@ -82,5 +82,16 @@
                             (label msg2)
                             (db "Hello Dudes!\n")))) "test")
         (call-with-input-pipe "./test" read-all)))
+
+(test 42
+      (begin
+        (emit-binary (assemble-elf (compile '((42)))) "test")
+        (call-with-input-pipe "./test; echo $?" read)))
+
+(test 0
+      (begin
+        (emit-binary (assemble-elf (compile '((def a : i32)
+                                              (ref a)))) "test")
+        (call-with-input-pipe "./test; echo $?" read)))
 
 (test-exit)

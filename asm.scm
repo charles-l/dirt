@@ -100,8 +100,8 @@
 
 (define (mem-access r m)
   (cond
-    ((or (null? (cdr m)) (zero? (car m)))
-     `(,(modr/m (reg-code r) (reg-code (car m)) #b00)))
+    ((zero? (car m))
+     `(,(modr/m (reg-code r) (reg-code (cdr m)) #b00)))
     ((imm8? (car m))
      `(,(modr/m (reg-code r) (reg-code (cdr m)) #b01) ,(car m)))
     ((imm32? (car m))
@@ -127,11 +127,12 @@
          (('mov (? label? l) (? reg? r))
           `(,(code+reg #xB8 r) ,(delay-addr (hash-table-ref labels l))))
 
-         (('push (? reg? r))
-          `(,(code+reg #x50 r)))
-         (('push (? imm8? i))
+         (('pushb (? imm8? i))
           `(#x6A ,i))
-         (('push (? imm32? i))
+
+         (('pushw (? reg? r))
+          `(,(code+reg #x50 r)))
+         (('pushw (? imm32? i))
           `(#x68 ,@(i32 i)))
 
          (('pop (? reg? r))
