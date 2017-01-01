@@ -129,6 +129,7 @@
 (test "heyo world!"
       (begin
         (emit-binary (assemble-elf (compile '((data msg "heyo world!")
+
                                               (asm movw msg %ecx)
                                               (asm movw 1 %ebx)
                                               (asm movw 4 %eax)

@@ -71,9 +71,6 @@
 (define (code+reg code reg)
   (bitwise-ior code (reg-code reg)))
 
-(define (code op ar)
-  (list op ar))
-
 ; get last byte of some value
 (define (byte val)
   (bitwise-and #xFF val))
@@ -112,50 +109,68 @@
     ((imm32? (car m))
      `(,(modr/m (reg-code r) (reg-code (cdr m)) #b10) ,@(i32 (car m))))))
 
-(define-syntax delay-addr
-  (syntax-rules ()
-                ((delay-addr addr)
-                 (delay (i32 addr)))))
+(define-record op-promise size thunk)
+
+(define (force-op-promise p)
+  ((op-promise-thunk p)))
+
+(define-syntax delay-op
+  (er-macro-transformer
+    (lambda (exp rename compare)
+      (let ((op-bytes (drop-right (cdr exp) 1))
+            (addr (car (take-right exp 1))))
+        `(make-op-promise ,(+ addr-len (length op-bytes))
+                          (lambda ()
+                            (append (list ,@op-bytes) (i32 ,addr))))))))
+
+(define (bytes . l)
+  (append-map
+    (lambda (e)
+      (cond
+        ((list? e) e)
+        (else
+          (list e))))
+    l))
 
 (define (x86 expr addr labels)
   (match expr
          (('ret)
-          `(#xC3))
+          (bytes #xC3))
          (('movw (? reg? r1) (? reg? r2))
-          `(#x89 ,(modr/m (reg-code r1) (reg-code r2))))
+          (bytes #x89 (modr/m (reg-code r1) (reg-code r2))))
          (('movw (? reg? r) (? mem? m))
-          `(#x89 ,@(mem-access r m)))
+          (bytes #x89 (mem-access r m)))
          (('movw (? mem? m) (? reg? r))
-          `(#x8B ,@(mem-access r m)))
+          (bytes #x8B (mem-access r m)))
          (('movw (? imm32? i) (? reg? r))
-          `(,(code+reg #xB8 r) ,@(i32 i)))
+          (bytes (code+reg #xB8 r) (i32 i)))
          (('movw (? label? l) (? reg? r))
-          `(,(code+reg #xB8 r) ,(delay-addr (hash-table-ref (labels) l))))
+          (delay-op (code+reg #xB8 r) (hash-table-ref (labels) l)))
 
          (('pushb (? imm8? i))
-          `(#x6A ,i))
+          (bytes #x6A i))
 
          (('pushw (? reg? r))
-          `(,(code+reg #x50 r)))
+          (bytes (code+reg #x50 r)))
          (('pushw (? imm32? i))
-          `(#x68 ,@(i32 i)))
+          (bytes #x68 (i32 i)))
 
          (('pop (? reg? r))
-          `(,(code+reg #x58 r)))
+          (bytes (code+reg #x58 r)))
 
          (('cmp '%eax (? imm32? i))
-          `(#x3D ,@(i32 i)))
+          (bytes #x3D (i32 i)))
          (('cmp (? reg? r1) (? reg? r2))
-          `(#x3B ,(modr/m (reg-code r2) (reg-code r1))))
+          (bytes #x3B (modr/m (reg-code r2) (reg-code r1))))
 
          (('addw '%eax (? imm32? i))
-          `(#x05 ,@(i32 i)))
+          (bytes #x05 (i32 i)))
 
          (('sub '%eax (? imm32? i))
-          `(#x2D ,@(i32 i)))
+          (bytes #x2D (i32 i)))
 
          (('imul (? reg? r1) (? reg? r2))
-          `(#x0F #xAF ,(modr/m (reg-code r2) (reg-code r1))))
+          (bytes #x0F #xAF (modr/m (reg-code r2) (reg-code r1))))
 
          (('label (? symbol? l))
           (if (hash-table-ref/default (labels) l #f)
@@ -164,30 +179,30 @@
           '())
 
          (('or (? reg? r) (? imm32? i))
-          `(#x81 ,(modr/m #b001 (reg-code r)) ,@(i32 i)))
+          (bytes #x81 (modr/m #b001 (reg-code r)) (i32 i)))
 
          (('and (? reg? r) (? imm32? i))
-          `(#x81 ,(modr/m #b100 (reg-code r)) ,@(i32 i)))
+          (bytes #x81 (modr/m #b100 (reg-code r)) (i32 i)))
 
          (('jmp (? label? l))
-          ; TODO: find a different way of calculating the size of the program based on i16 and i32
-          `(#xE9 ,(delay-addr (- (hash-table-ref (labels) l) addr 5))))
+          (delay-op #xE9 (addr-len (- (hash-table-ref (labels) l) addr 5))))
+
          (('je (? label? l))
-          `(#x0F #x84 ,(delay-addr (- (hash-table-ref (labels) l) addr 6))))
+          (delay-op #x0F #x84 (- (hash-table-ref (labels) l) addr 6)))
          (('jne (? label? l))
-          `(#x0F #x85 ,(delay-addr (- (hash-table-ref (labels) l) addr 6))))
+          (delay-op #x0F #x85 (- (hash-table-ref (labels) l) addr 6)))
 
          (('call (? label? l)) ; TODO: handle pointer
-          `(#xE8 ,(delay-addr (- (hash-table-ref (labels) l) addr 5))))
+          (delay-op #xE8 (- (hash-table-ref (labels) l) addr 5)))
 
          (('shl (? reg? r1) (? imm8? i))
-          `(#xC1 ,(modr/m #b100 (reg-code r1)) ,i))
+          (bytes #xC1 (modr/m #b100 (reg-code r1)) i))
 
          (('shr (? reg? r1) (? imm8? r2))
-          `(#xC1 ,(modr/m #b101 (reg-code r1)) ,r2))
+          (bytes #xC1 (modr/m #b101 (reg-code r1)) r2))
 
          (('int (? imm8? i))
-          `(#xCD ,i))
+          (bytes #xCD i))
 
          (('db (? imm8? i) ...)
           i)
@@ -198,32 +213,45 @@
            (error "failed to parse expression" expr))))
 
 (define (op-len o)
-  (+ (count (lambda (n) (not (promise? n))) o)
-     ; all promises return a 4 byte address
-     (* 4 (count promise? o))))
+  (if (op-promise? o)
+    (op-promise-size o)
+    (length o)))
+
+; first pass
+(define (assemble1 asm labels start-addr)
+  (let l ((asm asm) (addr start-addr))
+    (cond
+      ((null? asm) '())
+      (else
+        (let ((o (x86 (car asm) addr labels)))
+          (cons o (l (cdr asm) (+ addr (op-len o)))))))))
+
+(define (offset-labels labels keys offset)
+  (map (lambda (k)
+         (hash-table-set! (labels) k
+                          (+ offset
+                             (hash-table-ref (labels) k))))
+       keys))
+
+; second pass (optional offset for address)
+(define (assemble2 asm labels)
+  (append-map
+    (lambda (l)
+      (if (op-promise? l)
+        (force-op-promise l)
+        l)) asm))
 
 (define (assemble asm #!optional (labels (make-parameter (make-hash-table))) (start-addr 0))
-  (let ((addr start-addr))
-    (map ; second pass
-      (lambda (l)
-        (append-map
-          (lambda (o)
-            (cond
-              ((promise? o)
-               (force o)) ; fill in addresses
-              (else (list o)))) l))
-      (map ; first pass
-        (lambda (expr)
-          (let ((o (x86 expr addr labels)))
-            (set! addr (+ addr (op-len o)))
-            o))
-        asm))))
+  (assemble2 (assemble1 asm labels start-addr) labels))
 
 ;;; ELF
 
 (define (get-section section asm)
   (cond ((assoc section asm) => cdr)
         (else '())))
+
+(define (get-labels asm)
+  (map cadr (filter (lambda (e) (eq? (car e) 'label)) asm)))
 
 (define (assemble-elf asm)
   (define ehdr-size 52) ; elf header size
@@ -232,47 +260,29 @@
                    (lambda (n) (not (null? n)))
                    (map (cut get-section <> asm) '(.data .text))))
   (define entry-point (+ #x8048000 (+ ehdr-size (* phdr-n phdr-size))))
-  (define data-addr #x08048200)
   (define labels (make-parameter (make-hash-table)))
   ; ELF header
-  (let* ((data (assemble (get-section '.data asm) labels data-addr))
-         (text (assemble (get-section '.text asm) labels entry-point))
-
-         (text-size (apply + (map op-len text)))
+  (let* ((data (assemble1 (get-section '.data asm) labels 0))
          (data-size (apply + (map op-len data)))
 
-         ;; HOLY CRAP
-         ;; TODO FIXME FIXME FIXME OH SO GROSS
+         (text (assemble1 (get-section '.text asm) labels entry-point))
+         (text-size (apply + (map op-len text)))
+
          (data-addr (+ entry-point text-size))
-
-         (labels (make-parameter (make-hash-table)))
-
-         ;; OH WHY MUST IT BE DONE TWICE?! WHY?!?!!!
-         (data (assemble (get-section '.data asm) labels data-addr))
-         ;; MY EYES...
-         (text (assemble (get-section '.text asm) labels entry-point))
-         ;; ...THEY BLEEEEEEEEDDDD
-
-         ;; AT LEAST IT WORKS - BUT AT WHAT COST?!
-         ;; MUST WE SACRIFICE HUMANITY FOR RUNNABLE CODE?
-         ;; MY HEART LAMENTS
-         ;; MY SOUL GROANS
-         ;; MY BRAIN TREMBLES
-         ;; I REGRET IT ALL
-         ;; PLZ FIXME AS SOON AS POSSIBLE
 
          (elf-header (list
                        ;; ident
-                       `(#x7F
-                         ,(char->integer #\E)
-                         ,(char->integer #\L)
-                         ,(char->integer #\F))
-                       `(,(case (cadr (assoc arch arches))
-                            ((32) 1)
-                            ((64) 2)))
-                       '(1) ; little endian
-                       '(1) ; version
-                       '(0) ; abi (0 = sysv)
+                       (bytes #x7F
+                              (char->integer #\E)
+                              (char->integer #\L)
+                              (char->integer #\F))
+                       (bytes
+                         (case (cadr (assoc arch arches))
+                           ((32) 1)
+                           ((64) 2)))
+                       (bytes 1 ; little endian
+                              1 ; version
+                              0) ; abi (0 = sysv)
                        (make-list 8 0) ; then 8 bytes of padding
 
                        ;; type
@@ -327,10 +337,11 @@
                                     (+ ehdr-size (* phdr-n phdr-size) text-size)
                                     data-size
                                     4)))))
+    (offset-labels labels (get-labels (get-section '.data asm)) data-addr)
     (append elf-header
             program-header-table
-            text
-            data)))
+            (list (assemble2 text labels)
+                  (assemble2 data labels)))))
 
 (define (make-program-header virtual-addr offset sz flags)
   (list
@@ -348,8 +359,5 @@
     (with-output-to-port
       p
       (lambda ()
-        (map emit-byte
-             (apply
-               append
-               l))))
+        (map emit-byte (concatenate l))))
     (close-output-port p)))
