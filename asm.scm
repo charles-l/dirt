@@ -114,7 +114,7 @@
 (define (force-op-promise p)
   ((op-promise-thunk p)))
 
-(define-syntax delay-op
+(define-syntax delay-bytes
   (er-macro-transformer
     (lambda (exp rename compare)
       (let ((op-bytes (drop-right (cdr exp) 1))
@@ -145,17 +145,16 @@
          (('movw (? imm32? i) (? reg? r))
           (bytes (code+reg #xB8 r) (i32 i)))
          (('movw (? label? l) (? reg? r))
-          (delay-op (code+reg #xB8 r) (hash-table-ref (labels) l)))
+          (delay-bytes (code+reg #xB8 r) (hash-table-ref (labels) l)))
 
          (('pushb (? imm8? i))
           (bytes #x6A i))
-
          (('pushw (? reg? r))
           (bytes (code+reg #x50 r)))
          (('pushw (? imm32? i))
           (bytes #x68 (i32 i)))
 
-         (('pop (? reg? r))
+         (('popw (? reg? r))
           (bytes (code+reg #x58 r)))
 
          (('cmp '%eax (? imm32? i))
@@ -165,6 +164,8 @@
 
          (('addw '%eax (? imm32? i))
           (bytes #x05 (i32 i)))
+         (('addw (? reg? r1) (? reg? r2))
+          (bytes #x03 (modr/m (reg-code r2) (reg-code r1))))
 
          (('sub '%eax (? imm32? i))
           (bytes #x2D (i32 i)))
@@ -185,15 +186,15 @@
           (bytes #x81 (modr/m #b100 (reg-code r)) (i32 i)))
 
          (('jmp (? label? l))
-          (delay-op #xE9 (addr-len (- (hash-table-ref (labels) l) addr 5))))
+          (delay-bytes #xE9 (- (hash-table-ref (labels) l) addr 5)))
 
          (('je (? label? l))
-          (delay-op #x0F #x84 (- (hash-table-ref (labels) l) addr 6)))
+          (delay-bytes #x0F #x84 (- (hash-table-ref (labels) l) addr 6)))
          (('jne (? label? l))
-          (delay-op #x0F #x85 (- (hash-table-ref (labels) l) addr 6)))
+          (delay-bytes #x0F #x85 (- (hash-table-ref (labels) l) addr 6)))
 
          (('call (? label? l)) ; TODO: handle pointer
-          (delay-op #xE8 (- (hash-table-ref (labels) l) addr 5)))
+          (delay-bytes #xE8 (- (hash-table-ref (labels) l) addr 5)))
 
          (('shl (? reg? r1) (? imm8? i))
           (bytes #xC1 (modr/m #b100 (reg-code r1)) i))
@@ -253,6 +254,7 @@
 (define (get-labels asm)
   (map cadr (filter (lambda (e) (eq? (car e) 'label)) asm)))
 
+; TODO: document this monstrosity
 (define (assemble-elf asm)
   (define ehdr-size 52) ; elf header size
   (define phdr-size 32) ; progam header size
@@ -263,9 +265,9 @@
   (define labels (make-parameter (make-hash-table)))
   ; ELF header
   (let* ((data (assemble1 (get-section '.data asm) labels 0))
-         (data-size (apply + (map op-len data)))
-
          (text (assemble1 (get-section '.text asm) labels entry-point))
+
+         (data-size (apply + (map op-len data)))
          (text-size (apply + (map op-len text)))
 
          (data-addr (+ entry-point text-size))
@@ -337,6 +339,7 @@
                                     (+ ehdr-size (* phdr-n phdr-size) text-size)
                                     data-size
                                     4)))))
+    ; now fix the data address for all the labels
     (offset-labels labels (get-labels (get-section '.data asm)) data-addr)
     (append elf-header
             program-header-table
