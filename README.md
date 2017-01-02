@@ -18,11 +18,11 @@ Generate an ELF executable:
 (load "asm.scm")
 
 (emit-binary
-  (list (assemble-elf
-          '((.text
-             (movw 1  %eax)
-             (movw 42 %ebx)
-             (int #x80))))) "the-answer-to-everything")
+ (assemble-elf
+  '((.text
+      (movw 1  %eax)
+      (movw 42 %ebx)
+      (int #x80)))) "the-answer-to-everything")
 ```
 
 You can check the status code with `echo $?`
