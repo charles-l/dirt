@@ -5,9 +5,11 @@
 (define (objdump) (system (conc "objdump -D -mi386 -b binary " outfile)))
 
 (define (run-test)
+  (system (conc "chmod +x " outfile))
   (call-with-input-pipe (conc "./" outfile) read-all))
 
 (define (run-test-get-status)
+  (system (conc "chmod +x " outfile))
   (call-with-input-pipe (conc "./" outfile "; echo $?") read))
 
 (test-group "assembler"
